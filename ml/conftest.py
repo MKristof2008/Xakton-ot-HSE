@@ -3,7 +3,6 @@ import inspect
 import sys
 
 sys.path.insert(0, ".")
-sys.path.insert(0, "ml")
 
 
 def pytest_pyfunc_call(pyfuncitem):
