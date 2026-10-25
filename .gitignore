@@ -31,3 +31,6 @@ venv/
 node_modules/
 dist/
 build/
+
+# секреты
+.env
