@@ -93,6 +93,8 @@ class LLMClient:
                 last_error = e
             except urllib.error.URLError as e:
                 last_error = e
+            except ConnectionResetError as e:
+                last_error = e
             except Exception as e:
                 raise ModelCallError(str(e)) from e
             if attempt < self.retries:
