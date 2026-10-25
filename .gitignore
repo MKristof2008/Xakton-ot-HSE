@@ -34,3 +34,4 @@ build/
 
 # секреты
 .env
+__pycache__/
