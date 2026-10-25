@@ -18,8 +18,11 @@ export const apiMode: ApiMode = rawMode === 'live' ? 'live' : 'demo';
 
 export const isDemoMode = apiMode === 'demo';
 
-/** Маршрут проверки. В dev-режиме проксируется на backend (см. vite.config.ts). */
-export const apiUrl = (import.meta.env.VITE_API_URL ?? '').trim() || '/api/check';
+/**
+ * Маршрут проверки. В dev-режиме проксируется на backend (см. vite.config.ts).
+ * Backend отдаёт /api/verify-text; если маршрут вернётся к /api/check — задайте VITE_API_URL.
+ */
+export const apiUrl = (import.meta.env.VITE_API_URL ?? '').trim() || '/api/verify-text';
 
 /** Лимит длины сообщения. Согласовать с backend. */
 export const maxTextLength = readInt(import.meta.env.VITE_MAX_TEXT_LENGTH, 4000, 200, 20000);
