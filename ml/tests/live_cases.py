@@ -68,4 +68,57 @@ CASES = [
                            content_kind=ContentKind.page)],
         "expect": "insufficient",
     },
+    # 8. экономика: ставка ЦБ подтверждена
+    {
+        "name": "supported: ставка ЦБ (cbr.ru + РБК)",
+        "message": "Центробанк поднял ключевую ставку до 21% — деньги кончаются!",
+        "sources": [
+            Source(id="s1", title="Банк России", url="https://cbr.ru/press/keypr/",
+                   content="Совет директоров Банка России принял решение повысить ключевую ставку до 21,00% годовых.",
+                   content_kind=ContentKind.page),
+            Source(id="s2", title="РБК", url="https://rbc.ru/economics/stavka",
+                   content="ЦБ повысил ключевую ставку до 21% годовых, это максимум с 2003 года.",
+                   content_kind=ContentKind.page),
+        ],
+        "expect": "supported",
+    },
+    # 9. экономика: фейк про отмену наличных
+    {
+        "name": "contradicted: наличные не отменяют (РИА + ЦБ)",
+        "message": "С 1 января в России запрещают наличные деньги, срочно снимайте!",
+        "sources": [
+            Source(id="s1", title="РИА Новости", url="https://ria.ru/economy/nal",
+                   content="Банк России опроверг сообщения о запрете наличных: такие планы не обсуждаются.",
+                   content_kind=ContentKind.page),
+            Source(id="s2", title="Банк России", url="https://cbr.ru/press/nal",
+                   content="ЦБ сообщил, что информация о запрете наличных расчётов с 1 января не соответствует действительности.",
+                   content_kind=ContentKind.page),
+        ],
+        "expect": "contradicted",
+    },
+    # 10. крипта: нужен контекст (Forbes)
+    {
+        "name": "context: биткоин «обвалился» — только на одной бирже",
+        "message": "Биткоин рухнул на 40% за час, крипте конец!",
+        "sources": [
+            Source(id="s1", title="Forbes", url="https://forbes.ru/crypto/btc",
+                   content="На бирже BTC-E котировки биткоина на 40% ниже рынка из-за технического сбоя; на крупнейших биржах цена изменилась менее чем на 2%.",
+                   content_kind=ContentKind.page),
+        ],
+        "expect": "context",
+    },
+    # 11. крипта: конфликт источников (Яндекс.Новости-агрегатор vs Google News-агрегатор)
+    {
+        "name": "insufficient: конфликт про регулирование крипты",
+        "message": "Майнинг в России полностью запретили с этого месяца.",
+        "sources": [
+            Source(id="s1", title="Агрегатор новостей", url="https://news.example.com/1",
+                   content="Подписан закон, ограничивающий майнинг в отдельных регионах в пиковые часы.",
+                   content_kind=ContentKind.page),
+            Source(id="s2", title="РБК Крипто", url="https://rbc.ru/crypto/mining",
+                   content="Закон легализует майнинг для юрлиц из реестра, полного запрета не вводится.",
+                   content_kind=ContentKind.page),
+        ],
+        "expect": None,  # ориентир: не supported; модель должна заметить противоречие
+    },
 ]
