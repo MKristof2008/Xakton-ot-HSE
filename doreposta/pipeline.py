@@ -16,12 +16,14 @@ from .llm_client import LLMClient
 from .prompts import PROMPT_A_EXTRACT, PROMPT_B_EVALUATE
 from .schemas import (
     Claim,
+    ClaimResult,
     ContentKind,
     EvaluationResult,
     Evidence,
     ExtractionResult,
     InvalidResponse,
     ModelTimeout,
+    Relation,
     Source,
     Status,
 )
@@ -214,6 +216,14 @@ def _snippet_only(evidences: Sequence[Evidence], src_by_id: dict) -> bool:
     )
 
 
+def _downgrade(cr: ClaimResult, reason: str, next_action: str) -> None:
+    """Понижает статус до insufficient, сохраняя объяснение модели."""
+    cr.status = Status.insufficient
+    cr.limitations.append(reason)
+    cr.explanation = cr.explanation or "Данных недостаточно для подтверждения или опровержения"
+    cr.next_action = cr.next_action or next_action
+
+
 def validate_result(
     result: EvaluationResult,
     sources: Sequence[Source],
@@ -224,7 +234,8 @@ def validate_result(
     - неизвестный source_id → удалить доказательство;
     - цитата отсутствует в content источника → удалить доказательство;
     - только snippet → статус понижается до insufficient;
-    - без оснований для supported/contradicted/context → insufficient + причина.
+    - без оснований для supported/contradicted/context → insufficient + причина;
+    - supported без supports, contradicted без contradicts, context без условия → insufficient.
     """
     src_by_id = {s.id: s for s in sources}
     claim_by_id = {c.id: c for c in claims}
@@ -255,15 +266,31 @@ def validate_result(
             cr.limitations.append("Модель вернула недостоверные ссылки: " + "; ".join(note_parts))
 
         if cr.status != Status.insufficient:
+            relations = {item.relation for item in cr.evidence}
             if _snippet_only(cr.evidence, src_by_id):
-                cr.status = Status.insufficient
-                cr.limitations.append("Есть только поисковый snippet — недостаточно для вывода")
-                cr.explanation = cr.explanation or "Данных недостаточно для подтверждения или опровержения"
-                cr.next_action = cr.next_action or "Открыть первоисточник и проверить полный текст"
+                _downgrade(cr, "Есть только поисковый snippet — недостаточно для вывода",
+                           "Открыть первоисточник и проверить полный текст")
             elif not cr.evidence:
-                cr.status = Status.insufficient
-                cr.limitations.append("Нет оснований для вывода: доказательства отсутствуют")
-                cr.explanation = cr.explanation or "Данных недостаточно для подтверждения или опровержения"
-                cr.next_action = cr.next_action or "Проверить первоисточник вручную"
+                _downgrade(cr, "Нет оснований для вывода: доказательства отсутствуют",
+                           "Проверить первоисточник вручную")
+            elif cr.status == Status.supported and Relation.supports not in relations:
+                _downgrade(cr, "Нет цитаты с relation=supports — материал не подтверждает утверждение",
+                           "Проверить первоисточник вручную")
+            elif cr.status == Status.contradicted and Relation.contradicts not in relations:
+                _downgrade(cr, "Нет цитаты с relation=contradicts — прямое противоречие не найдено",
+                           "Проверить первоисточник вручную")
+            elif cr.status == Status.context:
+                if not {Relation.supports, Relation.adds_context} & relations:
+                    _downgrade(cr, "Нет цитаты, на которую опирается уточнение",
+                               "Проверить первоисточник вручную")
+                elif not [item for item in cr.limitations if item.strip()]:
+                    named = [ev.explanation.strip() for ev in cr.evidence
+                             if ev.relation in (Relation.supports, Relation.adds_context)
+                             and ev.explanation.strip()]
+                    if named:
+                        cr.limitations.append(named[0])  # условие берём из объяснения модели
+                    else:
+                        _downgrade(cr, "Не названо условие, которое меняет смысл утверждения",
+                                   "Уточнить условие в первоисточнике")
 
     return result
