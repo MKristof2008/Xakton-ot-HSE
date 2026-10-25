@@ -21,25 +21,27 @@
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt
+.venv/Scripts/python.exe -m pip install -r ml/requirements.txt
 
-# тесты (модель не вызывается)
+# тесты (модель не вызывается), из корня репозитория
 .venv/Scripts/python.exe -m pytest -q
 
 # демонстрация пайплайна
-.venv/Scripts/python.exe example.py
+cd ml && ../.venv/Scripts/python.exe example.py
 ```
 
 Переменные окружения (см. `.env.example`): `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TIMEOUT`.
 
 ## Структура
 
-- `doreposta/schemas.py` — схемы `Source`, `Claim`, `ClaimResult`, `EvaluationResult`, ошибки
-- `doreposta/prompts.py` — промпты извлечения и оценки утверждений
-- `doreposta/llm_client.py` — `LLMClient` (реальная модель) и `FakeLLMClient` (тесты)
-- `doreposta/pipeline.py` — `extract_claims`, `evaluate_claims`, `compose_reply`, `validate_result`
-- `tests/` — сценарии пайплайна и правила статусов
-- `example.py` — сквозной пример на fake-клиенте
+- `ml/` — зона ML: LLM-пайплайн, схемы, проверка результата, тесты (см. `ml/README.md`)
+  - `ml/doreposta/schemas.py` — схемы `Source`, `Claim`, `ClaimResult`, `EvaluationResult`, ошибки
+  - `ml/doreposta/prompts.py` — промпты извлечения и оценки утверждений
+  - `ml/doreposta/llm_client.py` — `LLMClient` (реальная модель) и `FakeLLMClient` (тесты)
+  - `ml/doreposta/pipeline.py` — `extract_claims`, `evaluate_claims`, `compose_reply`, `validate_result`
+  - `ml/tests/` — сценарии пайплайна, правила статусов, live-кейсы
+  - `ml/example.py`, `ml/live_run.py` — пример на fake-клиенте и прогон на живой модели
+- `backend/` — HTTP API, поиск и получение страниц (зона backend)
 
 ## Команда
 
