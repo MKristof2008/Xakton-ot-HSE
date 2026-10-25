@@ -52,4 +52,56 @@ cd ml
   на источник, обрезка помечается в `limitations`.
 
 Правила закреплены в `tests/test_status_rules.py` и `tests/test_hardening.py` —
-меняешь правило, правь тест рядом, иначе он покажет расхождение.
+меняешь правило, правь тест рядом, иначе он покажет расходление.
+
+## Пайплайн «Лакмус» (`ml/lakmus`)
+
+Новый контракт ТЗ (разделы 3, 6.2–6.9): мультимодальный чекер
+image / text / url с оценкой доверия, «двумя адвокатами» и
+рекомендациями следующих шагов.
+
+### Структура
+
+- `lakmus/schemas.py` — единые схемы: `CheckResult`, `Trust`, `SignalResult`, `Debate`, `NextStep`.
+- `lakmus/context.py` — `CheckContext`, `SearchHit`, `SearchProvider`.
+- `lakmus/runner.py` — `run_signals`: параллельный запуск с таймаутами и SSE.
+- `lakmus/fusion.py` — слияние сигналов по Йосангу, уровни доверия.
+- `lakmus/debate.py` — «два адвоката» и формирование `next_steps`.
+- `lakmus/signals/` — сигналы: `metadata`, `ai_artifacts`, `manipulation`, `source_search`,
+  `screenshot` (image); `claims`, `sources`, `quotes`, `rhetoric`, `machine_text` (text/url).
+- `lakmus/pipeline.py` — оркестратор `check(ctx)`.
+- `lakmus/metrics.py`, `dataset.py`, `demo.py` — метрики, набор и демо.
+- `tools/eval.py`, `tools/export_schema.py` — оценка на разметке и JSON Schema контракта.
+- `tests/test_pipeline_lakmus.py`, `test_signals_image.py`, `test_signals_text.py`,
+  `test_debate.py`, `test_metrics.py` — тесты.
+
+### Запуск
+
+```bash
+cd /c/Users/beliy/Xakton-ot-HSE
+.venv/Scripts/python.exe -m pytest ml -q
+.venv/Scripts/python.exe -m ml.tools.eval
+.venv/Scripts/python.exe -m ml.tools.export_schema
+```
+
+### Пример использования
+
+```python
+import asyncio
+from lakmus import CheckInput, InputType
+from lakmus.context import CheckContext
+from lakmus.pipeline import check
+
+async def main():
+    ctx = CheckContext(
+        check_id="demo_1",
+        input=CheckInput(type=InputType.text, extracted_text="Сегодня в Москве снег."),
+        text="Сегодня в Москве снег.",
+    )
+    result = await check(ctx)
+    print(result.trust.score, result.trust.level)
+
+asyncio.run(main())
+```
+
+Контракт экспортируется в `contracts/check_result.schema.json`.

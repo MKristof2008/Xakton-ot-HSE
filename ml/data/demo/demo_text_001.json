@@ -1,0 +1,207 @@
+{
+  "id": "demo_text_001",
+  "status": "done",
+  "input": {
+    "type": "text",
+    "sha256": "45c48cce2e2d7fbdea1afc51c7c6ad26a5b7a8f3c1d2e4f60718293a4b5c6d7e",
+    "preview_url": null,
+    "extracted_text": "Срочно! В министерстве подтвердили, что с 1 сентября все школьные завтраки отменяются, а деньги направят на ремонт дорог."
+  },
+  "trust": {
+    "score": 46,
+    "uncertainty": 0.3753,
+    "coverage": 0.5455,
+    "level": "fog",
+    "conflict": true
+  },
+  "signals": [
+    {
+      "id": "I1",
+      "name": "Манифест происхождения (C2PA)",
+      "stage": "provenance",
+      "verdict": "neutral",
+      "strength": 0.0,
+      "reliability": 0.95,
+      "summary": "У скриншота нет манифеста C2PA: изображение собрано из переписки.",
+      "details": {
+        "c2pa": false
+      },
+      "overlays": []
+    },
+    {
+      "id": "I2",
+      "name": "Следы генеративных моделей",
+      "stage": "artifacts",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "скриншот пере-сжат, анализ текстур недоступен",
+      "details": {
+        "reason": "скриншот пере-сжат, анализ текстур недоступен"
+      },
+      "overlays": []
+    },
+    {
+      "id": "I3",
+      "name": "Метаданные EXIF",
+      "stage": "artifacts",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "EXIF срезан при создании скриншота",
+      "details": {
+        "reason": "EXIF срезан при создании скриншота"
+      },
+      "overlays": []
+    },
+    {
+      "id": "I4",
+      "name": "Обратный поиск и первоисточник",
+      "stage": "sources",
+      "verdict": "supports_real",
+      "strength": 0.85,
+      "reliability": 0.8,
+      "summary": "Скриншот совпал с кадром из репортажа 2021 года — фон и люди те же.",
+      "details": {
+        "first_seen": "2021-11-03"
+      },
+      "overlays": []
+    },
+    {
+      "id": "I5",
+      "name": "Физика кадра",
+      "stage": "artifacts",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "скриншот пере-сжат, геометрию не проверить",
+      "details": {
+        "reason": "скриншот пере-сжат, геометрию не проверить"
+      },
+      "overlays": []
+    },
+    {
+      "id": "I6",
+      "name": "Частотный анализ",
+      "stage": "artifacts",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "скриншот пере-сжат, спектр неинформативен",
+      "details": {
+        "reason": "скриншот пере-сжат, спектр неинформативен"
+      },
+      "overlays": []
+    },
+    {
+      "id": "T1",
+      "name": "Поиск первоисточника текста",
+      "stage": "provenance",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "первоисточник текста не найден",
+      "details": {
+        "reason": "первоисточник текста не найден"
+      },
+      "overlays": []
+    },
+    {
+      "id": "T2",
+      "name": "Стилометрия и детектор машинного текста",
+      "stage": "artifacts",
+      "verdict": "supports_fake",
+      "strength": 0.95,
+      "reliability": 0.7,
+      "summary": "Ритм и выбор слов типичны для генеративной модели: ровные абзацы, канцелярские связки.",
+      "details": {
+        "machine_probability": 0.91
+      },
+      "overlays": []
+    },
+    {
+      "id": "T3",
+      "name": "Проверка утверждений по источникам",
+      "stage": "sources",
+      "verdict": "supports_fake",
+      "strength": 0.6,
+      "reliability": 0.6,
+      "summary": "Ни один найденный источник не подтверждает отмену завтраков с 1 сентября.",
+      "details": {
+        "claims_checked": 2,
+        "contradicted": 1
+      },
+      "overlays": []
+    },
+    {
+      "id": "T4",
+      "name": "Согласованность дат, чисел и названий",
+      "stage": "context",
+      "verdict": "neutral",
+      "strength": 0.0,
+      "reliability": 0.3,
+      "summary": "Дата «1 сентября» правдоподобна, явных расхождений нет.",
+      "details": {},
+      "overlays": []
+    },
+    {
+      "id": "T5",
+      "name": "Пунктуация, эмодзи и типографика",
+      "stage": "artifacts",
+      "verdict": "supports_fake",
+      "strength": 0.6,
+      "reliability": 0.05,
+      "summary": "Типографика (длинное тире, кавычки-ёлочки) чаще встречается у генераторов, но сигнал слабый.",
+      "details": {},
+      "overlays": []
+    }
+  ],
+  "debate": {
+    "for_real": [
+      {
+        "text": "Скриншот совпал с кадром репортажа 2021 года — изображение настоящее.",
+        "signal_ids": [
+          "I4"
+        ]
+      }
+    ],
+    "for_fake": [
+      {
+        "text": "Текст выглядит машинным: ровный ритм и канцелярские связки.",
+        "signal_ids": [
+          "T2"
+        ]
+      },
+      {
+        "text": "Ни один источник не подтверждает отмену завтраков — утверждение не подтверждено.",
+        "signal_ids": [
+          "T3"
+        ]
+      }
+    ]
+  },
+  "provenance": [
+    {
+      "date": "2021-11-03",
+      "where": "репортаж регионального издания",
+      "note": "тот же кадр, другой контекст"
+    }
+  ],
+  "next_steps": [
+    {
+      "kind": "hold",
+      "title": "Не пересылать до проверки",
+      "why": "Сигналы противоречат друг другу: картинка настоящая, текст — нет."
+    },
+    {
+      "kind": "ask_source",
+      "title": "Спросить, откуда скриншот",
+      "why": "Первоисточник текста не найден, а подпись к кадру не совпадает с репортажем."
+    }
+  ],
+  "limits": [
+    "T1: первоисточник текста не найден",
+    "I2, I3, I5, I6: скриншот без исходного файла"
+  ],
+  "duration_ms": 3400
+}

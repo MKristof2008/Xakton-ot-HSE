@@ -1,0 +1,8 @@
+{"id": "img_real_001", "label": "real", "score": 91, "uncertainty": 0.16, "level": "likely_real"}
+{"id": "img_real_002", "label": "real", "score": 76, "uncertainty": 0.28, "level": "likely_real"}
+{"id": "img_gen_001", "label": "fake", "score": 9, "uncertainty": 0.17, "level": "likely_fake"}
+{"id": "img_gen_002", "label": "fake", "score": 21, "uncertainty": 0.30, "level": "likely_fake"}
+{"id": "img_edit_001", "label": "edited", "score": 44, "uncertainty": 0.53, "level": "fog"}
+{"id": "img_mis_002", "label": "mislabelled", "score": 63, "uncertainty": 0.42, "level": "fog"}
+{"id": "txt_fake_001", "label": "fake", "score": 13, "uncertainty": 0.22, "level": "likely_fake"}
+{"id": "txt_real_001", "label": "real", "score": 40, "uncertainty": 0.57, "level": "fog"}

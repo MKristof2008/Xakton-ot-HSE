@@ -1,0 +1,14 @@
+{"id": "img_real_001", "path": "data/samples/real_photo/img_real_001.jpg", "kind": "image", "category": "real_photo", "label": "real", "generator": null, "source": "reuters.com"}
+{"id": "img_real_002", "path": "data/samples/real_photo/img_real_002.jpg", "kind": "image", "category": "real_photo", "label": "real", "generator": null, "source": "commons.wikimedia.org"}
+{"id": "img_real_003", "path": "data/samples/real_photo/img_real_003.jpg", "kind": "image", "category": "real_photo", "label": "real", "generator": null, "source": "own archive"}
+{"id": "img_gen_001", "path": "data/samples/generated/img_gen_001.png", "kind": "image", "category": "generated", "label": "fake", "generator": "midjourney", "source": "соцсеть, пост 2024"}
+{"id": "img_gen_002", "path": "data/samples/generated/img_gen_002.png", "kind": "image", "category": "generated", "label": "fake", "generator": "sdxl", "source": "соцсеть, пост 2024"}
+{"id": "img_gen_003", "path": "data/samples/generated/img_gen_003.png", "kind": "image", "category": "generated", "label": "fake", "generator": "dalle3", "source": "форум, пост 2025"}
+{"id": "img_edit_001", "path": "data/samples/edited/img_edit_001.jpg", "kind": "image", "category": "edited", "label": "edited", "generator": null, "source": "телеграм-канал"}
+{"id": "img_edit_002", "path": "data/samples/edited/img_edit_002.jpg", "kind": "image", "category": "edited", "label": "edited", "generator": null, "source": "телеграм-канал"}
+{"id": "img_mis_001", "path": "data/samples/mislabelled/img_mis_001.jpg", "kind": "image", "category": "mislabelled", "label": "mislabelled", "generator": null, "source": "новостной агрегатор"}
+{"id": "img_mis_002", "path": "data/samples/mislabelled/img_mis_002.jpg", "kind": "image", "category": "mislabelled", "label": "mislabelled", "generator": null, "source": "новостной агрегатор"}
+{"id": "txt_real_001", "path": "data/samples/text/txt_real_001.txt", "kind": "text", "category": "text", "label": "real", "generator": null, "source": "официальный пресс-релиз"}
+{"id": "txt_real_002", "path": "data/samples/text/txt_real_002.txt", "kind": "text", "category": "text", "label": "real", "generator": null, "source": "колонка журналиста"}
+{"id": "txt_fake_001", "path": "data/samples/text/txt_fake_001.txt", "kind": "text", "category": "text", "label": "fake", "generator": "gpt-4o", "source": "анонимный канал"}
+{"id": "txt_fake_002", "path": "data/samples/text/txt_fake_002.txt", "kind": "text", "category": "text", "label": "fake", "generator": "claude", "source": "анонимный канал"}

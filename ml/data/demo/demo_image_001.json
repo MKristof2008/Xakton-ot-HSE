@@ -1,0 +1,207 @@
+{
+  "id": "demo_image_001",
+  "status": "done",
+  "input": {
+    "type": "image",
+    "sha256": "8f14e45fceea167a5a36dedd4bea2543c1c9f5b1d6a7e8c2b3a4f59607182934",
+    "preview_url": "/demo/demo_image_001.jpg",
+    "extracted_text": null
+  },
+  "trust": {
+    "score": 84,
+    "uncertainty": 0.3253,
+    "coverage": 0.5455,
+    "level": "likely_real",
+    "conflict": false
+  },
+  "signals": [
+    {
+      "id": "I1",
+      "name": "Манифест происхождения (C2PA)",
+      "stage": "provenance",
+      "verdict": "neutral",
+      "strength": 0.0,
+      "reliability": 0.95,
+      "summary": "Манифеста C2PA нет: файл пере-сохранён, метаданные создателя утрачены.",
+      "details": {
+        "c2pa": false
+      },
+      "overlays": []
+    },
+    {
+      "id": "I2",
+      "name": "Следы генеративных моделей",
+      "stage": "artifacts",
+      "verdict": "supports_real",
+      "strength": 0.53,
+      "reliability": 0.75,
+      "summary": "Следов диффузионных моделей не видно: текстуры кожи и волос естественные.",
+      "details": {
+        "planning_artifacts": 0.12
+      },
+      "overlays": []
+    },
+    {
+      "id": "I3",
+      "name": "Метаданные EXIF",
+      "stage": "artifacts",
+      "verdict": "supports_real",
+      "strength": 0.5,
+      "reliability": 0.4,
+      "summary": "EXIF сохранён: съёмка на смартфон в 2019 году, следов редакторов нет.",
+      "details": {
+        "camera": "Pixel 2",
+        "year": 2019
+      },
+      "overlays": []
+    },
+    {
+      "id": "I4",
+      "name": "Обратный поиск и первоисточник",
+      "stage": "sources",
+      "verdict": "supports_real",
+      "strength": 0.56,
+      "reliability": 0.8,
+      "summary": "Этот же кадр опубликован в 2019 году — раньше проверяемого поста.",
+      "details": {
+        "first_seen": "2019-06-14"
+      },
+      "overlays": []
+    },
+    {
+      "id": "I5",
+      "name": "Физика кадра",
+      "stage": "artifacts",
+      "verdict": "supports_real",
+      "strength": 0.3,
+      "reliability": 0.5,
+      "summary": "Свет и тени согласованы, отражения соответствуют источникам.",
+      "details": {},
+      "overlays": []
+    },
+    {
+      "id": "I6",
+      "name": "Частотный анализ",
+      "stage": "artifacts",
+      "verdict": "supports_real",
+      "strength": 0.5,
+      "reliability": 0.3,
+      "summary": "Спектральных аномалий склейки не обнаружено.",
+      "details": {},
+      "overlays": []
+    },
+    {
+      "id": "T1",
+      "name": "Поиск первоисточника текста",
+      "stage": "provenance",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "в проверке нет текста",
+      "details": {
+        "reason": "в проверке нет текста"
+      },
+      "overlays": []
+    },
+    {
+      "id": "T2",
+      "name": "Стилометрия и детектор машинного текста",
+      "stage": "artifacts",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "в проверке нет текста",
+      "details": {
+        "reason": "в проверке нет текста"
+      },
+      "overlays": []
+    },
+    {
+      "id": "T3",
+      "name": "Проверка утверждений по источникам",
+      "stage": "sources",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "в проверке нет текста",
+      "details": {
+        "reason": "в проверке нет текста"
+      },
+      "overlays": []
+    },
+    {
+      "id": "T4",
+      "name": "Согласованность дат, чисел и названий",
+      "stage": "context",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "в проверке нет текста",
+      "details": {
+        "reason": "в проверке нет текста"
+      },
+      "overlays": []
+    },
+    {
+      "id": "T5",
+      "name": "Пунктуация, эмодзи и типографика",
+      "stage": "artifacts",
+      "verdict": "unavailable",
+      "strength": 0.0,
+      "reliability": 0.0,
+      "summary": "в проверке нет текста",
+      "details": {
+        "reason": "в проверке нет текста"
+      },
+      "overlays": []
+    }
+  ],
+  "debate": {
+    "for_real": [
+      {
+        "text": "Первоисточник найден в 2019 году: кадр жил в сети задолго до проверяемого поста.",
+        "signal_ids": [
+          "I4"
+        ]
+      },
+      {
+        "text": "Следов генерации нет: текстуры естественные, спектр чистый.",
+        "signal_ids": [
+          "I2",
+          "I6"
+        ]
+      }
+    ],
+    "for_fake": [
+      {
+        "text": "Манифеста происхождения нет — это отсутствие доказательства, а не доказательство подделки.",
+        "signal_ids": [
+          "I1"
+        ]
+      }
+    ]
+  },
+  "provenance": [
+    {
+      "date": "2019-06-14",
+      "where": "flickr.com/photos/…",
+      "note": "первая найденная публикация кадра"
+    }
+  ],
+  "next_steps": [
+    {
+      "kind": "verify",
+      "title": "Проверить подпись к фото",
+      "why": "Сам кадр настоящий, но подпись могли переписать под другую новость."
+    },
+    {
+      "kind": "ask_source",
+      "title": "Спросить ссылку на первоисточник",
+      "why": "Публикация 2019 года поможет установить реальный контекст съёмки."
+    }
+  ],
+  "limits": [
+    "T1–T5 недоступны: в проверке нет текста"
+  ],
+  "duration_ms": 2800
+}

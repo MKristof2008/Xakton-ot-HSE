@@ -1,0 +1,368 @@
+{
+  "$defs": {
+    "CheckInput": {
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/InputType"
+        },
+        "sha256": {
+          "default": "",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "preview_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preview Url"
+        },
+        "extracted_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extracted Text"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CheckInput",
+      "type": "object"
+    },
+    "CheckStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "done",
+        "failed"
+      ],
+      "title": "CheckStatus",
+      "type": "string"
+    },
+    "Debate": {
+      "properties": {
+        "for_real": {
+          "items": {
+            "$ref": "#/$defs/DebateThesis"
+          },
+          "title": "For Real",
+          "type": "array"
+        },
+        "for_fake": {
+          "items": {
+            "$ref": "#/$defs/DebateThesis"
+          },
+          "title": "For Fake",
+          "type": "array"
+        }
+      },
+      "title": "Debate",
+      "type": "object"
+    },
+    "DebateThesis": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "signal_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Signal Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "DebateThesis",
+      "type": "object"
+    },
+    "InputType": {
+      "enum": [
+        "image",
+        "text",
+        "url"
+      ],
+      "title": "InputType",
+      "type": "string"
+    },
+    "Level": {
+      "enum": [
+        "confirmed",
+        "likely_real",
+        "fog",
+        "doubtful",
+        "likely_fake"
+      ],
+      "title": "Level",
+      "type": "string"
+    },
+    "NextStep": {
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/NextStepKind"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "why": {
+          "default": "",
+          "title": "Why",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "title"
+      ],
+      "title": "NextStep",
+      "type": "object"
+    },
+    "NextStepKind": {
+      "enum": [
+        "verify",
+        "ask_source",
+        "hold",
+        "share"
+      ],
+      "title": "NextStepKind",
+      "type": "string"
+    },
+    "Overlay": {
+      "properties": {
+        "type": {
+          "default": "heatmap",
+          "enum": [
+            "heatmap",
+            "boxes",
+            "regions"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "title": "Overlay",
+      "type": "object"
+    },
+    "ProvenanceEntry": {
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date"
+        },
+        "where": {
+          "default": "",
+          "title": "Where",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "title": "ProvenanceEntry",
+      "type": "object"
+    },
+    "SignalResult": {
+      "description": "Результат одного сигнала. Поля повторяют общий контракт.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/Stage"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict",
+          "default": "unavailable"
+        },
+        "strength": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Strength",
+          "type": "number"
+        },
+        "reliability": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Reliability",
+          "type": "number"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        },
+        "overlays": {
+          "items": {
+            "$ref": "#/$defs/Overlay"
+          },
+          "title": "Overlays",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "stage"
+      ],
+      "title": "SignalResult",
+      "type": "object"
+    },
+    "Stage": {
+      "enum": [
+        "provenance",
+        "artifacts",
+        "sources",
+        "context"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "Trust": {
+      "properties": {
+        "score": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "uncertainty": {
+          "default": 1.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Uncertainty",
+          "type": "number"
+        },
+        "coverage": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Coverage",
+          "type": "number"
+        },
+        "level": {
+          "$ref": "#/$defs/Level",
+          "default": "fog"
+        },
+        "conflict": {
+          "default": false,
+          "title": "Conflict",
+          "type": "boolean"
+        }
+      },
+      "title": "Trust",
+      "type": "object"
+    },
+    "Verdict": {
+      "enum": [
+        "supports_real",
+        "supports_fake",
+        "neutral",
+        "unavailable"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/CheckStatus",
+      "default": "done"
+    },
+    "input": {
+      "$ref": "#/$defs/CheckInput"
+    },
+    "trust": {
+      "$ref": "#/$defs/Trust"
+    },
+    "signals": {
+      "items": {
+        "$ref": "#/$defs/SignalResult"
+      },
+      "title": "Signals",
+      "type": "array"
+    },
+    "debate": {
+      "$ref": "#/$defs/Debate"
+    },
+    "provenance": {
+      "items": {
+        "$ref": "#/$defs/ProvenanceEntry"
+      },
+      "title": "Provenance",
+      "type": "array"
+    },
+    "next_steps": {
+      "items": {
+        "$ref": "#/$defs/NextStep"
+      },
+      "title": "Next Steps",
+      "type": "array"
+    },
+    "limits": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limits",
+      "type": "array"
+    },
+    "duration_ms": {
+      "default": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "input"
+  ],
+  "title": "CheckResult",
+  "type": "object"
+}
