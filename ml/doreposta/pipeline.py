@@ -157,18 +157,6 @@ async def extract_claims(
 
 # ---------- 2. evaluate_claims ----------
 
-def _sources_block(sources: Sequence[Source]) -> str:
-    parts = []
-    for s in sources:
-        parts.append(
-            f"<source id=\"{s.id}\" kind=\"{s.content_kind.value}\" "
-            f"origin=\"{s.origin.value}\" title=\"{s.title}\""
-            + (f" published_at=\"{s.published_at}\"" if s.published_at else "")
-            + f">\n{s.content}\n</source>"
-        )
-    return "\n\n".join(parts)
-
-
 def _shingles(text: str, n: int = 5) -> set:
     words = _norm_ws(text).split()
     if len(words) < n:

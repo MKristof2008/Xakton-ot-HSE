@@ -33,4 +33,23 @@ cd ml
 
 Переменные окружения: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TIMEOUT`,
 `LLM_RETRIES` (повторы на 429/5xx, по умолчанию 2), `LLM_BACKOFF` (пауза, 0.5 с)
-(шаблон — `.env.example` в корне).
+(шаблоны — `ml/.env.example` и `.env.example` в корне). `LLM_BASE_URL` указывается
+без `/v1` — клиент сам дописывает `/v1/chat/completions`.
+
+## Согласование промптов и проверок
+
+`prompts.py` и `validate_result` — одна пара: модель отвечает, проверка перепроверяет
+ответ детерминированно. Меняя промпт, учитывай, что уже проверяется в коде:
+
+- `supported` требует evidence с `relation=supports`, `contradicted` — с `contradicts`,
+  `context` — с `supports`/`adds_context` и названным условием в `explanation`;
+  иначе статус понижается до `insufficient`.
+- Год из утверждения должен быть в цитате или в `published_at`; расхождение чисел
+  (когда числа есть с обеих сторон) и отрицаний тоже понижает статус.
+- `content_kind="snippet"` не даёт `supported`/`contradicted`/`context`.
+- Цитаты короче двух значимых слов отбрасываются, одинаковые утверждения схлопываются.
+- Материалы собирает `context_build.sources_block`: до 6 источников, до 4000 символов
+  на источник, обрезка помечается в `limitations`.
+
+Правила закреплены в `tests/test_status_rules.py` и `tests/test_hardening.py` —
+меняешь правило, правь тест рядом, иначе он покажет расхождение.
