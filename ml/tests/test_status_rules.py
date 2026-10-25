@@ -12,7 +12,7 @@ from doreposta import (
 from doreposta.pipeline import validate_result
 
 CONTENT = "Университет подтвердил открытие нового факультета в 2024 году."
-QUOTE = "Университет подтвердил открытие нового факультета"
+QUOTE = "Университет подтвердил открытие нового факультета в 2024 году"
 
 
 def src(id="s1"):

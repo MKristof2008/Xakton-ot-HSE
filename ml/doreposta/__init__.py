@@ -4,7 +4,14 @@ from .pipeline import (
     compose_reply,
     evaluate_claims,
     extract_claims,
+    summarize,
     validate_result,
+)
+from .recording import (
+    RecordingLLMClient,
+    ReplayLLMClient,
+    SequenceLLMClient,
+    load_records,
 )
 from .schemas import (
     Claim,
@@ -27,5 +34,6 @@ __all__ = [
     "ExtractionResult", "FakeLLMClient", "InvalidResponse", "LLMClient",
     "ModelCallError", "ModelTimeout", "Origin", "Relation", "Source",
     "Status", "compose_reply", "evaluate_claims", "extract_claims",
-    "validate_result",
+    "summarize", "validate_result", "RecordingLLMClient", "ReplayLLMClient",
+    "SequenceLLMClient", "load_records",
 ]
