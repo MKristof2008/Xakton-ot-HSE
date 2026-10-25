@@ -105,3 +105,6 @@ asyncio.run(main())
 ```
 
 Контракт экспортируется в `contracts/check_result.schema.json`.
+- `lakmus/llm.py` — `RecordingLLMClient` / `ReplayLLMClient` для кэширования и воспроизведения вызовов LLM.
+- `lakmus/search.py` — `BackendSearchProvider` (поиск через backend endpoint) и `FakeSearchProvider` (для тестов).
+- `lakmus/validate.py` — `validate_check_result` для проверки `CheckResult` по `contracts/check_result.schema.json`.

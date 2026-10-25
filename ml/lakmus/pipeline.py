@@ -19,6 +19,7 @@ from .debate import run_debate
 from .fusion import fuse
 from .runner import run_signals
 from .schemas import CheckInput, CheckResult, CheckStatus, NextStep, ProvenanceEntry, SignalResult
+from .validate import validate_check_result
 
 
 async def check(
@@ -80,7 +81,7 @@ async def check(
         limits=limits,
         duration_ms=duration_ms,
     )
-    return result.validate_contract()
+    return validate_check_result(result.validate_contract())
 
 
 def _collect_provenance(signal_results: list[SignalResult]) -> list[ProvenanceEntry]:
