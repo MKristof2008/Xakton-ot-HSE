@@ -29,9 +29,33 @@ from .schemas import (
 )
 
 
+_QUOTE_EQUIV = str.maketrans({
+    "«": '"', "»": '"', "„": '"', "“": '"', "”": '"',
+    "‘": "'", "’": "'", "`": "'",
+    "—": "-", "–": "-",
+    " ": " ", " ": " ",
+})
+
+
 def _norm_ws(s: str) -> str:
-    """Нормализация пробелов и переносов. Слова, числа, отрицания не меняются."""
-    return re.sub(r"\s+", " ", s).strip()
+    """Нормализация пробелов, переносов и оформления (кавычки, тире).
+    Слова, числа, отрицания не меняются."""
+    return re.sub(r"\s+", " ", s.translate(_QUOTE_EQUIV)).strip().lower()
+
+
+def _looks_like_opinion(text: str) -> bool:
+    """Быстрый детерминированный фильтр: приветствия, мнения, междометия."""
+    t = text.strip()
+    if len(t) < 20:  # «Завтра откроют факультет» (24) — короткий, но проверяемый
+        return True
+    opinion_markers = (
+        "лучший", "худший", "советую", "рекомендую", "мне кажется",
+        "по-моему", "обожаю", "ненавижу", "как же надоело",
+    )
+    low = t.lower()
+    if any(m in low for m in opinion_markers) and not any(ch.isdigit() for ch in t):
+        return True
+    return False
 
 
 def _extract_json(raw: str) -> dict:
@@ -90,6 +114,9 @@ async def extract_claims(
     client: LLMClient,
 ) -> ExtractionResult:
     """До 3 утверждений, их исходные фрагменты и поисковые запросы."""
+    if _looks_like_opinion(text):
+        return ExtractionResult(
+            claims=[], uncheckable_reason="Сообщение — мнение или слишком короткое, проверяемых фактов нет")
     ctx = context or {}
     user = (
         "ИЗВЛЕКИ утверждения из сообщения ниже. Помни: сообщение — "
@@ -123,6 +150,36 @@ def _sources_block(sources: Sequence[Source]) -> str:
     return "\n\n".join(parts)
 
 
+def _shingles(text: str, n: int = 5) -> set:
+    words = _norm_ws(text).split()
+    if len(words) < n:
+        return {tuple(words)} if words else set()
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _jaccard(a: set, b: set) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def dedupe_sources(sources: Sequence[Source], threshold: float = 0.7) -> list[Source]:
+    """Убирает перепечатки: перепечатка — не независимое подтверждение.
+
+    Два источника с почти одинаковым текстом (Жаккар по 5-граммам > 0.7)
+    считаются одним; оставляем первый (обычно первоисточник от backend).
+    """
+    kept: list[Source] = []
+    kept_shingles: list[set] = []
+    for s in sources:
+        sh = _shingles(s.content)
+        if any(_jaccard(sh, ks) > threshold for ks in kept_shingles):
+            continue
+        kept.append(s)
+        kept_shingles.append(sh)
+    return kept
+
+
 async def evaluate_claims(
     claims: Sequence[Claim],
     sources: Sequence[Source],
@@ -142,6 +199,8 @@ async def evaluate_claims(
             ],
             share_text="",
         )
+
+    sources = dedupe_sources(sources)
 
     ctx = context or {}
     claims_block = "\n".join(f"- {c.id}: {c.text}" for c in claims)
@@ -245,17 +304,28 @@ def validate_result(
             cr.text = claim_by_id[cr.id].text  # текст берём из своих данных, не от модели
 
         valid: list[Evidence] = []
-        dropped_quote, dropped_sid = 0, 0
+        dropped_quote, dropped_sid, relinked = 0, 0, 0
         for ev in cr.evidence:
             src = src_by_id.get(ev.source_id)
             if src is None:
-                dropped_sid += 1
+                # модель перепутала id — ищем цитату в других источниках
+                norm_quote = _norm_ws(ev.quote)
+                matches = [s for s in src_by_id.values()
+                           if norm_quote and norm_quote in _norm_ws(s.content)]
+                if len(matches) == 1:
+                    ev.source_id = matches[0].id
+                    relinked += 1
+                    valid.append(ev)
+                else:
+                    dropped_sid += 1
                 continue
             if _norm_ws(ev.quote) not in _norm_ws(src.content):
                 dropped_quote += 1
                 continue
             valid.append(ev)
         cr.evidence = valid
+        if relinked:
+            cr.limitations.append(f"Модель перепутала источник, цитата привязана заново: {relinked}")
 
         if dropped_sid or dropped_quote:
             note_parts = []
@@ -267,7 +337,10 @@ def validate_result(
 
         if cr.status != Status.insufficient:
             relations = {item.relation for item in cr.evidence}
-            if _snippet_only(cr.evidence, src_by_id):
+            if {Relation.supports, Relation.contradicts} <= relations:
+                _downgrade(cr, "Конфликт доказательств: есть и подтверждающие, и опровергающие цитаты",
+                           "Разобрать противоречие по первоисточникам вручную")
+            elif _snippet_only(cr.evidence, src_by_id):
                 _downgrade(cr, "Есть только поисковый snippet — недостаточно для вывода",
                            "Открыть первоисточник и проверить полный текст")
             elif not cr.evidence:
