@@ -1,139 +1,333 @@
-"""FastAPI-обёртка над пайплайном «До репоста».
+"""HTTP API «Проверено» — фактчекинг по замыслу эксперта NMH.
 
-Принимает текст сообщения + источники (как в ml/doreposta/schemas.py),
-возвращает статусы утверждений и готовый ответ для пересылки.
+Две ступени по подписке:
+  free — вердикт и уровень доверия;
+  pro  — плюс разбор: сигналы, доказательства, источники, что проверить дальше.
 
-Запуск: py -3 uvicorn main:app --reload --port 8000
-Ключ модели backend берёт из .env рядом с ../ml (см. ml/.env.example).
+Плюс вкладка топов: что проверяют сейчас, по счётчику одинаковых запросов.
+
+Запуск: py -3 -m uvicorn backend.main:app --port 8000
 """
+
+from __future__ import annotations
+
 import os
 import sys
+import time
+from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
-# пайплайн живёт в ../ml
-ML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ml")
-sys.path.insert(0, os.path.abspath(ML_DIR))
+ML_DIR = Path(__file__).resolve().parent.parent / "ml"
+BACKEND_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(ML_DIR))
+sys.path.insert(0, str(BACKEND_DIR))
 
-env_path = os.path.join(os.path.abspath(ML_DIR), ".env")
-if os.path.exists(env_path):
-    for line in open(env_path, encoding="utf-8"):
+env_path = ML_DIR / ".env"
+if env_path.exists():
+    for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
 
-from doreposta import (  # noqa: E402
-    FakeLLMClient, LLMClient, Source, EvaluationResult,
-    compose_reply, evaluate_claims, extract_claims, validate_result,
-)
-from doreposta.schemas import Claim  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from lakmus.context import CheckContext  # noqa: E402
+from lakmus.pipeline import check as run_check  # noqa: E402
+from lakmus.schemas import CheckInput, InputType  # noqa: E402
 
-app = FastAPI(title="До репоста — фактчекинг API")
+import store  # noqa: E402
+
+MAX_TEXT = 4000
+
+app = FastAPI(title="Проверено — фактчекинг API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Token"],
 )
 
 
-def make_client():
-    """Живой клиент, если заданы LLM_* в .env; иначе fake для локальных прогонов."""
-    if os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL"):
-        return LLMClient()
-    return FakeLLMClient(lambda s, u: '{"claims": [], "uncheckable_reason": "нет ключа — backend в demo-режиме"}')
+# ---------- ошибки в одном формате ----------
+
+def fail(code: str, message: str, status: int) -> JSONResponse:
+    return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
 
 
-class VerifyTextRequest(BaseModel):
-    text: str
-    sources: list[Source] = []
-    message_date: str | None = None
+@app.exception_handler(404)
+async def not_found(request: Request, exc: Any) -> JSONResponse:
+    return fail("NOT_FOUND", "такого адреса нет", 404)
 
 
-class ClaimReply(BaseModel):
-    claim_id: str
-    text: str
-    status: str
-    explanation: str
-    limitations: list[str]
-    next_action: str
+# ---------- модели ----------
+
+class CheckRequest(BaseModel):
+    text: str = Field(..., max_length=MAX_TEXT)
 
 
-class VerifyTextResponse(BaseModel):
-    reply: str
-    claims: list[ClaimReply]
+class UpgradeRequest(BaseModel):
+    plan: str = "pro"
 
 
-@app.post("/api/verify-text", response_model=VerifyTextResponse)
-async def verify_text(req: VerifyTextRequest):
-    """Основной эндпоинт по ТЗ: текст -> статусы утверждений + ответ для чата."""
-    client = make_client()
-    ctx = {"message_date": req.message_date} if req.message_date else {}
+class PinRequest(BaseModel):
+    text_hash: str
+    title: str = ""
 
-    extraction = await extract_claims(req.text, ctx, client)
-    if not extraction.claims:
-        return VerifyTextResponse(
-            reply=extraction.uncheckable_reason or "Проверяемых фактов не найдено.",
-            claims=[])
 
-    claims = [Claim(id=c.id, text=c.text, original_span=c.original_span) for c in extraction.claims]
-    evaluation = await evaluate_claims(claims, req.sources, ctx, client)
-    evaluation = validate_result(evaluation, req.sources, claims)
-    reply = compose_reply(evaluation, req.sources)
+# ---------- сборка ответа ----------
 
-    return VerifyTextResponse(
-        reply=reply,
-        claims=[ClaimReply(
-            claim_id=cr.id, text=cr.text, status=cr.status.value,
-            explanation=cr.explanation, limitations=cr.limitations,
-            next_action=cr.next_action,
-        ) for cr in evaluation.claims],
+def level_label(level: str) -> str:
+    return {
+        "confirmed": "Подтверждено",
+        "likely_real": "Скорее правда",
+        "fog": "Туман",
+        "doubtful": "Сомнительно",
+        "likely_fake": "Скорее фейк",
+    }.get(level, level)
+
+
+def verdict_of(result: Any) -> str:
+    """Короткий вердикт для бесплатного тарифа — одно слово."""
+    level = result.trust.level.value
+    if level in ("confirmed", "likely_real"):
+        return "правда"
+    if level in ("likely_fake", "doubtful"):
+        return "фейк"
+    return "непонятно"
+
+
+def public_payload(result: Any, check_id: str, plan: str) -> dict[str, Any]:
+    """Собирает ответ по тарифу. Free не видит разбор — только вердикт."""
+    base: dict[str, Any] = {
+        "id": check_id,
+        "verdict": verdict_of(result),
+        "level": result.trust.level.value,
+        "level_label": level_label(result.trust.level.value),
+        "score": result.trust.score,
+        "uncertainty": round(result.trust.uncertainty, 4),
+        "plan": plan,
+    }
+    if plan != "pro":
+        base["upgrade_hint"] = (
+            "Разбор — почему такой вердикт, источники и что проверить дальше — "
+            "доступен по подписке."
+        )
+        return base
+
+    base["signals"] = [
+        {
+            "id": s.id,
+            "name": s.name,
+            "stage": s.stage.value,
+            "verdict": s.verdict.value,
+            "strength": round(s.strength, 3),
+            "reliability": round(s.reliability, 3),
+            "summary": s.summary,
+            "details": s.details,
+        }
+        for s in result.signals
+    ]
+    base["debate"] = {
+        "for_real": [{"text": t.text, "signal_ids": t.signal_ids} for t in result.debate.for_real],
+        "for_fake": [{"text": t.text, "signal_ids": t.signal_ids} for t in result.debate.for_fake],
+    }
+    base["provenance"] = [
+        {"date": p.date, "where": p.where, "note": p.note} for p in result.provenance
+    ]
+    base["next_steps"] = [
+        {"kind": n.kind.value, "title": n.title, "why": n.why} for n in result.next_steps
+    ]
+    base["limits"] = result.limits
+    base["duration_ms"] = result.duration_ms
+    return base
+
+
+def resolve_user(token: Optional[str]) -> Optional[dict[str, Any]]:
+    return store.user_by_token(token or "")
+
+
+# ---------- эндпоинты ----------
+
+@app.get("/api/health")
+async def health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "llm": bool(os.environ.get("LLM_API_KEY")),
+        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+@app.post("/api/check")
+async def check_text(
+    req: CheckRequest,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Проверить утверждение. Free — вердикт, pro — полный разбор."""
+    text = (req.text or "").strip()
+    if len(text) < 8:
+        return fail("BAD_INPUT", "слишком короткий текст: нужно хотя бы 8 символов", 422)
+    if len(text) > MAX_TEXT:
+        return fail("BAD_INPUT", f"текст длиннее {MAX_TEXT} символов", 422)
+
+    user = resolve_user(x_token)
+    plan = user["plan"] if user else "free"
+
+    if user and plan == "free" and store.free_quota_left(user["id"]) <= 0:
+        return fail(
+            "QUOTA_EXCEEDED",
+            "бесплатные проверки на сегодня закончились. Подписка снимает лимит.",
+            429,
+        )
+
+    check_id = f"chk_{int(time.time() * 1000) % 10**10:010d}"
+    ctx = CheckContext(
+        check_id=check_id,
+        input=CheckInput(type=InputType.text, extracted_text=text),
+        text=text,
     )
+    try:
+        result = await run_check(ctx, llm=None)
+    except Exception as exc:  # пайплайн упал — это не 500 без объяснения
+        return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
+
+    payload = public_payload(result, check_id, plan)
+    store.save_check(
+        text=text,
+        verdict=payload["verdict"],
+        score=result.trust.score,
+        uncertainty=result.trust.uncertainty,
+        level=result.trust.level.value,
+        full=payload,
+        user_id=user["id"] if user else None,
+    )
+    if user:
+        payload["quota_left"] = store.free_quota_left(user["id"]) if plan == "free" else None
+    return payload
 
 
-# --- legacy-мок старого демо (TrustLens), оставлен для совместимости с фронтом ---
-import random  # noqa: E402
+@app.get("/api/check/{check_id}")
+async def get_check(
+    check_id: str,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Повторно открыть проверку. Разбор отдаётся только по подписке."""
+    row = store.get_check(check_id)
+    if not row:
+        return fail("NOT_FOUND", "проверка не найдена", 404)
+    user = resolve_user(x_token)
+    plan = user["plan"] if user else "free"
+    full = row["full"]
+    if plan != "pro":
+        return {k: v for k, v in full.items() if k not in (
+            "signals", "debate", "provenance", "next_steps", "limits", "duration_ms"
+        )} | {"plan": plan, "upgrade_hint": "Разбор доступен по подписке."}
+    return full
 
-MOCK_RESPONSES = {
-    "fake": {
-        "trust_score": 14,
-        "metadata_analysis": "Critical anomalies found in EXIF data. Timestamps modified.",
-        "artifact_analysis": "Visual analysis revealed clear AI artifacts of diffusion models.",
-        "logic_analysis": "Text content contains high-level emotional manipulation.",
-        "action_plan": [
-            "Do not forward this media asset to any work or family chats.",
-            "Run a reverse image search to locate the original unaltered source.",
+
+@app.get("/api/top")
+async def top(limit: int = 20, hours: int = 48) -> dict[str, Any]:
+    """Топы проверяемых утверждений — та самая вкладка из совета эксперта."""
+    limit = max(1, min(50, limit))
+    hours = max(1, min(24 * 30, hours))
+    items = store.top_items(limit=limit, window_hours=hours)
+    for item in items:
+        item["level_label"] = level_label(item.get("level") or "fog")
+    return {"window_hours": hours, "items": items}
+
+
+@app.post("/api/top/pin")
+async def pin(req: PinRequest) -> Any:
+    if not req.text_hash:
+        return fail("BAD_INPUT", "нужен text_hash", 422)
+    store.pin_top(req.text_hash, req.title)
+    return {"ok": True}
+
+
+@app.get("/api/stats")
+async def stats() -> dict[str, Any]:
+    return store.stats()
+
+
+@app.post("/api/users")
+async def create_user() -> dict[str, Any]:
+    """Гостевой пользователь с бесплатным тарифом и своим токеном."""
+    return store.create_user("free")
+
+
+@app.get("/api/me")
+async def me(x_token: Optional[str] = Header(default=None, alias="X-Token")) -> Any:
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    out = {"id": user["id"], "plan": user["plan"]}
+    if user["plan"] == "free":
+        out["quota_left"] = store.free_quota_left(user["id"])
+        out["quota_per_day"] = store.FREE_CHECKS_PER_DAY
+    return out
+
+
+@app.post("/api/upgrade")
+async def upgrade(
+    req: UpgradeRequest,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Демо-апгрейд тарифа. В продукте здесь платёжный провайдер."""
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    if not store.upgrade_user(x_token or "", req.plan):
+        return fail("BAD_INPUT", "неизвестный тариф", 422)
+    return {"ok": True, "plan": req.plan}
+
+
+@app.get("/api/pricing")
+async def pricing() -> dict[str, Any]:
+    """Тарифы — то, что эксперт просила продумать подробно."""
+    return {
+        "plans": [
+            {
+                "id": "free",
+                "name": "Бесплатно",
+                "price_rub": 0,
+                "limits": f"{store.FREE_CHECKS_PER_DAY} проверок в день",
+                "features": ["Вердикт: правда, фейк или непонятно", "Уровень доверия"],
+            },
+            {
+                "id": "pro",
+                "name": "Разбор",
+                "price_rub": 300,
+                "limits": "Без ограничений",
+                "features": [
+                    "Всё из бесплатного",
+                    "Почему такой вердикт — по каждому сигналу",
+                    "Ссылки на первоисточники",
+                    "Что проверить дальше",
+                    "Без рекламы",
+                ],
+                "recommended": True,
+            },
+            {
+                "id": "team",
+                "name": "Редакция",
+                "price_rub": 5000,
+                "limits": "До 10 сотрудников",
+                "features": [
+                    "Всё из «Разбора»",
+                    "Проверка ссылок и скриншотов пачкой",
+                    "Доступ к топикам проверок",
+                    "Приоритетная поддержка",
+                ],
+            },
         ],
-    },
-    "true": {
-        "trust_score": 92,
-        "metadata_analysis": "Metadata is intact. No trace of tampering.",
-        "artifact_analysis": "Digital cloning or audio/video manipulation artifacts not detected.",
-        "logic_analysis": "Fact-checking confirms information aligns with official press releases.",
-        "action_plan": [
-            "This asset passed verification and has a high trust score.",
-            "You can safely use and cite this content in your workflow.",
-        ],
-    },
-}
-
-
-@app.post("/api/verify")
-async def verify_media(file: UploadFile = File(...)):
-    """Старый мок по файлу. Для фактчекинга текста используйте /api/verify-text."""
-    filename = (file.filename or "").lower()
-    if "fake" in filename or "test" in filename:
-        return MOCK_RESPONSES["fake"]
-    response = MOCK_RESPONSES["true"].copy()
-    response["trust_score"] = random.randint(75, 95)
-    return response
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+        "note": "Первый месяц бесплатно: сначала репутация, потом подписка.",
+    }

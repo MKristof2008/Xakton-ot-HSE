@@ -1,85 +1,117 @@
-import { apiUrl, requestTimeoutMs } from '../config';
-import type { CheckRequest, CheckResponse } from '../types';
-import { CheckError } from './errors';
-import { parseCheckResponse } from './validate';
+import { apiBaseUrl } from '../config';
+import type {
+  CheckResponse,
+  Me,
+  PricingResponse,
+  Stats,
+  TopResponse,
+} from '../types';
 
-/**
- * Backend сейчас отвечает в формате /api/verify-text:
- * { reply, claims: [{ claim_id, text, status, explanation, limitations, next_action }] }.
- * Приводим его к формату CheckResponse до строгой проверки.
- * Компоненты об этом формате не знают.
- */
-function normalizeLivePayload(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
-  const root: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+const TOKEN_KEY = 'provereno_token';
 
-  if (root.share_text === undefined && typeof root.reply === 'string') {
-    root.share_text = root.reply;
+export class ApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, message: string, status: number) {
+    super(message);
+    this.code = code;
+    this.status = status;
   }
-
-  if (Array.isArray(root.claims)) {
-    root.claims = root.claims.map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-      const claim: Record<string, unknown> = { ...(item as Record<string, unknown>) };
-      if (claim.id === undefined && typeof claim.claim_id === 'string') {
-        claim.id = claim.claim_id;
-      }
-      delete claim.claim_id;
-      return claim;
-    });
-  }
-
-  delete root.reply;
-  return root;
 }
 
-/**
- * Запрос к реальному backend.
- * Отмена пользователем и таймаут различаются, чтобы интерфейс показал
- * корректную причину сбоя.
- */
-export async function requestLiveCheck(text: string, signal: AbortSignal): Promise<CheckResponse> {
-  const controller = new AbortController();
-  let timedOut = false;
-
-  const onOuterAbort = () => controller.abort();
-  signal.addEventListener('abort', onOuterAbort, { once: true });
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, requestTimeoutMs);
-
-  const body: CheckRequest = { text };
-
+function readToken(): string | null {
+  // ?token= нужен только для демо-скриншотов и проверки тарифа в браузере.
   try {
-    let response: Response;
-    try {
-      response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (timedOut) throw new CheckError('timeout');
-      if (signal.aborted) throw new CheckError('aborted');
-      throw new CheckError('network', error instanceof Error ? error.message : undefined);
+    const fromUrl = new URLSearchParams(window.location.search).get('token');
+    if (fromUrl) {
+      localStorage.setItem(TOKEN_KEY, fromUrl);
+      return fromUrl;
     }
-
-    if (!response.ok) {
-      throw new CheckError('server', `HTTP ${response.status}`, response.status);
-    }
-
-    let raw: unknown;
-    try {
-      raw = await response.json();
-    } catch {
-      throw new CheckError('contract', 'ответ не является JSON');
-    }
-
-    return parseCheckResponse(normalizeLivePayload(raw));
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener('abort', onOuterAbort);
+  } catch {
+    /* ignore */
   }
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    /* приватный режим — просто работаем без сохранения */
+  }
+}
+
+export function currentToken(): string | null {
+  return readToken();
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  const token = readToken();
+  if (token) headers.set('X-Token', token);
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError('NETWORK', 'Сервер недоступен. Проверьте, что он запущен.', 0);
+  }
+
+  if (!response.ok) {
+    let code = `HTTP_${response.status}`;
+    let message = 'Запрос не выполнен';
+    try {
+      const body = (await response.json()) as { error?: { code?: string; message?: string } };
+      if (body?.error?.code) code = body.error.code;
+      if (body?.error?.message) message = body.error.message;
+    } catch {
+      /* тело не JSON */
+    }
+    throw new ApiError(code, message, response.status);
+  }
+  return (await response.json()) as T;
+}
+
+/** Гостевой пользователь: создаётся один раз и живёт в localStorage. */
+export async function ensureUser(): Promise<void> {
+  if (readToken()) return;
+  const user = await request<{ id: string; token: string }>('/users', { method: 'POST' });
+  writeToken(user.token);
+}
+
+export async function getMe(): Promise<Me> {
+  return request<Me>('/me');
+}
+
+export async function runCheck(text: string): Promise<CheckResponse> {
+  await ensureUser();
+  return request<CheckResponse>('/check', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function getTop(hours = 48): Promise<TopResponse> {
+  return request<TopResponse>(`/top?hours=${hours}`);
+}
+
+export async function getStats(): Promise<Stats> {
+  return request<Stats>('/stats');
+}
+
+export async function getPricing(): Promise<PricingResponse> {
+  return request<PricingResponse>('/pricing');
+}
+
+export async function upgrade(plan = 'pro'): Promise<void> {
+  await ensureUser();
+  await request('/upgrade', { method: 'POST', body: JSON.stringify({ plan }) });
 }

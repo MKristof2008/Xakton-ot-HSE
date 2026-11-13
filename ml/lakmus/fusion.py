@@ -24,6 +24,10 @@ FUSION_CONFIG: dict[str, float | dict[str, float]] = {
 }
 
 
+#: Сила сигнала (strength × reliability), после которой вердикт считается
+#: решающим и низкое покрытие не размывает его до «Тумана».
+STRONG_EVIDENCE = 0.45
+
 @dataclass(frozen=True)
 class Opinion:
     """Мнение (b, d, u): вера в «настоящее», вера в «подделку», неопределённость."""
@@ -137,7 +141,17 @@ def fuse(signals: Sequence[SignalResult]) -> Trust:
 
     if conflict:
         uncertainty = min(1.0, uncertainty + FUSION_CONFIG["conflict_uncertainty_bonus"])
-    if coverage < FUSION_CONFIG["coverage_floor"]:
+
+    # Недоступные сигналы не должны затирать прямой вердикт: если база
+    # фактов или поиск дали сильное «подтверждает/опровергает», честный
+    # ответ — этот вердикт, а не «Туман» из-за того, что остальное не
+    # отработало. Иначе получается «мы не знаем», хотя знаем.
+    strong_evidence = any(
+        s.verdict in (Verdict.supports_real, Verdict.supports_fake)
+        and s.strength * s.reliability >= STRONG_EVIDENCE
+        for s in signals
+    )
+    if coverage < FUSION_CONFIG["coverage_floor"] and not strong_evidence:
         uncertainty = max(uncertainty, FUSION_CONFIG["uncertainty_floor"])
 
     score = max(0, min(100, score))

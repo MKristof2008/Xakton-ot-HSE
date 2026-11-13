@@ -1,37 +1,11 @@
-# ОС и проводник
-.DS_Store
-Thumbs.db
-desktop.ini
-$RECYCLE.BIN/
-
-# Редакторы и IDE
-.idea/
-.vscode/
-*.swp
-
-# Секреты и локальные настройки
+# секреты и локальные данные
 .env
 .env.*
 !.env.example
-*.local
-
-# Логи и временные файлы
+backend/data/
 *.log
-tmp/
-temp/
-
-# Python
 __pycache__/
 *.py[cod]
-.venv/
-venv/
-.pytest_cache/
-
-# Node.js
 node_modules/
 dist/
-build/
-
-# секреты
-.env
-__pycache__/
+.pytest_cache/

@@ -16,6 +16,7 @@ from ..schemas import InputType
 from .ai_artifacts import AIArtifactsSignal
 from .manipulation import ManipulationSignal
 from .provenance import MetadataSignal
+from .kb_facts import KbFactsSignal
 from .quotes import QuotesSignal
 from .rhetoric import RhetoricSignal
 from .screenshot import ScreenshotSignal
@@ -34,6 +35,7 @@ SIGNALS: dict[str, list[type]] = {
     ],
     "text": [
         ClaimsSignal,
+        KbFactsSignal,
         SourcesSignal,
         QuotesSignal,
         RhetoricSignal,
@@ -41,6 +43,7 @@ SIGNALS: dict[str, list[type]] = {
     ],
     "url": [
         ClaimsSignal,
+        KbFactsSignal,
         SourcesSignal,
         QuotesSignal,
         RhetoricSignal,
