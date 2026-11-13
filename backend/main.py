@@ -23,7 +23,7 @@ if str(_BACKEND_DIR) not in sys.path:
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import UploadFile
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -97,6 +97,13 @@ class RequestBodyLimitMiddleware:
                 return
 
         received = 0
+        response_started = False
+
+        async def tracked_send(message: dict) -> None:
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
 
         async def limited_receive() -> dict:
             nonlocal received
@@ -108,13 +115,11 @@ class RequestBodyLimitMiddleware:
             return message
 
         try:
-            await self.inner(scope, limited_receive, send)
+            await self.inner(scope, limited_receive, tracked_send)
         except RequestTooLarge:
-            await _send_too_large(send)
-
-
-def _error_json(code: str, message: str, status: int) -> JSONResponse:
-    return JSONResponse(status_code=status, content={"error": {"code": code, "message": message}})
+            # Если ответ уже начался, переписать его нельзя — соединение просто рвётся.
+            if not response_started:
+                await _send_too_large(send)
 
 
 async def _send_too_large(send: Any) -> None:
@@ -208,17 +213,12 @@ async def process_offer(
     location: str,
     shot_at: Optional[str],
 ) -> None:
-    """Проверка в фоне: события в SSE, результат в БД, лот — по цене из контракта."""
+    """Фоновая проверка: события в SSE, результат в БД, лот — по цене из контракта."""
     broker.publish(offer_id, status_event(
         "status", status="checking", message="Проверка началась",
     ))
-    for stage in ("provenance", "artifacts", "sources", "context"):
-        broker.publish(offer_id, {
-            "kind": "status",
-            "event": "stage_started",
-            "stage": stage,
-            "status": "running",
-        })
+
+    seen_stages: set[str] = set()
 
     ctx = build_context(
         check_id=check_id,
@@ -232,6 +232,16 @@ async def process_offer(
     )
 
     async def on_signal_done(event: Any) -> None:
+        # Этап объявляем, когда пришёл первый сигнал этого этапа: не врём о старте.
+        stage = str(getattr(event.signal.stage, "value", event.signal.stage))
+        if stage not in seen_stages:
+            seen_stages.add(stage)
+            broker.publish(offer_id, {
+                "kind": "status",
+                "event": "stage_started",
+                "stage": stage,
+                "status": "running",
+            })
         broker.publish(offer_id, {
             "kind": "signal",
             "event": "signal_done",
@@ -393,9 +403,12 @@ async def offer_events(offer_id: str) -> StreamingResponse:
     """SSE прогресса проверки.
 
     Подписчик получает историю событий из буфера брокера и новые события из
-    своей очереди; поток закрывается на `done`/`error`.
+    своей очереди; поток закрывается на `done`/`error`. Если проверка уже
+    завершилась до подписки (или сервер перезапустили), итог восстанавливается
+    из БД, а не висит пустым потоком.
     """
-    _offer_or_404(offer_id)
+    offer = _offer_or_404(offer_id)
+    _replay_terminal(offer)
     queue = broker.subscribe(offer_id)
 
     async def stream():

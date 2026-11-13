@@ -12,7 +12,7 @@ frontend мог разбирать поток единообразно.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 #: Сколько событий держим в буфере на одну заявку.
 MAX_BUFFER = 200
@@ -84,8 +84,3 @@ def status_event(kind: str, **fields: Any) -> dict[str, Any]:
     event: dict[str, Any] = {"kind": kind}
     event.update({key: value for key, value in fields.items() if value is not None})
     return event
-
-
-def stop_after_done(offer_id: str, event: Optional[dict[str, Any]]) -> bool:
-    """Пора ли закрывать поток: событие done/error уже пришло."""
-    return bool(event is not None and event.get("kind") in ("done", "error")) or offer_id in broker._finished

@@ -1,8 +1,13 @@
-"""Детерминированная цена лота по правилу из docs/CONTRACT.md.
+"""Сборка лота из результата проверки.
 
-`price_rub = base × freshness × uniqueness × provenance × demand`,
-округление до 100 ₽. Каждый множитель объясняется в `why_price` человеческим
-языком. Никаких случайных чисел: одинаковый вход даёт одинаковую цену.
+Цену считает ML-сигнал `pricing` по правилу контракта — у него есть все входы
+(свежесть, уникальность, происхождение, спрос), и он же объясняет каждую цифру
+в `why_price`. Backend не переписывает его вывод: берёт `price_rub`,
+`why_price` и `listed` из `details`.
+
+Если сигнал `pricing` недоступен или его результат не по контракту, backend
+считает цену сам по тем же детерминированным правилам — иначе маркетплейс
+развалится из-за сбоя одного сигнала. Никаких случайных чисел.
 """
 
 from __future__ import annotations
@@ -13,7 +18,6 @@ from typing import Any, Optional
 BASE_RUB = 1500
 ROUND_TO = 100
 
-#: Категории спроса по ключевым словам подписи и локации.
 DEMAND_KEYWORDS: dict[str, tuple[float, str, tuple[str, ...]]] = {
     "incident": (1.8, "происшествие", (
         "пожар", "дым", "авари", "взрыв", "дтп", "катастроф", "обстрел",
@@ -49,7 +53,7 @@ def parse_dt(value: Any) -> Optional[datetime]:
         if dt is None:
             return None
     if dt.tzinfo is None:
-        # EXIF и ISO без зоны: считаем UTC и честно помечаем это в why_price.
+        # EXIF без зоны: считаем UTC и не делаем вид, что знаем больше.
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
@@ -67,8 +71,16 @@ def _signal(check: dict[str, Any], signal_id: str) -> dict[str, Any]:
     return {}
 
 
-def freshness(shot_at: Optional[datetime], now: datetime) -> tuple[float, str]:
-    """Свежесть по времени съёмки (CONTRACT: <1 ч ×3, <6 ч ×2, <24 ч ×1.5, <72 ч ×1, иначе ×0.5)."""
+def _details(check: dict[str, Any], signal_id: str) -> dict[str, Any]:
+    details = _signal(check, signal_id).get("details")
+    return details if isinstance(details, dict) else {}
+
+
+# --------------------------------------------------------------------------
+# Локальный расчёт — резерв, когда сигнал `pricing` недоступен
+# --------------------------------------------------------------------------
+
+def _freshness(shot_at: Optional[datetime], now: datetime) -> tuple[float, str]:
     if shot_at is None:
         return 1.0, "дата съёмки неизвестна — множитель 1.0"
     hours = max(0.0, (now - shot_at).total_seconds() / 3600.0)
@@ -83,55 +95,80 @@ def freshness(shot_at: Optional[datetime], now: datetime) -> tuple[float, str]:
     return 0.5, f"снято {hours / 24:.0f} сут назад — материал несвежий"
 
 
-def uniqueness(check: dict[str, Any]) -> tuple[float, str, bool, int, bool]:
-    """Уникальность по сигналу поиска первоисточника.
+def _local_multipliers(
+    check: dict[str, Any], offer: dict[str, Any], now: datetime
+) -> tuple[list[float], list[str], bool, dict[str, Any]]:
+    """Множители, объяснения и признак дубликата для локального расчёта."""
+    shot_at = parse_dt(offer.get("shot_at")) or parse_dt(_details(check, "metadata").get("datetime"))
+    fresh, fresh_why = _freshness(shot_at, now)
 
-    Возвращает (множитель, объяснение, unique, similar_in_archive, duplicate).
-    """
-    signal = _signal(check, "source_search")
-    details = signal.get("details") or {}
-    if signal.get("verdict") == "unavailable":
-        reason = signal.get("summary") or "сигнал недоступен"
-        return 1.0, f"уникальность не проверена ({reason}) — множитель 1.0", False, 0, False
-    earlier = details.get("earlier_than_claimed") or []
-    matches = details.get("matches") or []
-    if earlier:
-        return 0.0, "кадр публиковался раньше заявленной даты — это не оригинал", False, len(matches), True
-    if matches:
-        return 1.0, f"в архиве найдено похожих кадров: {len(matches)}", False, len(matches), False
-    return 2.0, "совпадений в архиве нет", True, 0, False
+    uniq_details = _details(check, "uniqueness")
+    if "unique" in uniq_details or "duplicate" in uniq_details:
+        duplicate = bool(uniq_details.get("duplicate"))
+        unique = bool(uniq_details.get("unique")) and not duplicate
+        similar = uniq_details.get("similar_in_archive") or 0
+        if duplicate:
+            uniq, uniq_why = 0.0, "дубликат уже есть в архиве — не выставляется"
+        elif unique:
+            uniq, uniq_why = 2.0, "совпадений в архиве нет"
+        else:
+            uniq, uniq_why = 1.0, f"похожих кадров в архиве: {similar}"
+    else:
+        duplicate, unique, similar = False, False, 0
+        reason = _signal(check, "uniqueness").get("summary") or "сигнал недоступен"
+        uniq, uniq_why = 1.0, f"уникальность не проверена ({reason[:120]}) — множитель 1.0"
 
+    meta = _details(check, "metadata")
+    gps = meta.get("gps") or {}
+    has_geo = gps.get("latitude") is not None and gps.get("longitude") is not None
+    if meta.get("camera") and meta.get("datetime"):
+        prov, prov_why = 1.5, "камера и дата съёмки в метаданных на месте"
+    elif meta.get("camera") or meta.get("datetime") or has_geo:
+        prov, prov_why = 1.0, "метаданные частичные"
+    elif _signal(check, "metadata").get("verdict") == "unavailable":
+        prov, prov_why = 0.7, "метаданные недоступны — множитель 0.7"
+    else:
+        prov, prov_why = 0.7, "в файле нет метаданных источника — множитель 0.7"
 
-def provenance(check: dict[str, Any]) -> tuple[float, str, str]:
-    """Происхождение по сигналу метаданных. Возвращает (множитель, объяснение, origin)."""
-    signal = _signal(check, "metadata")
-    details = signal.get("details") or {}
-    if signal.get("verdict") == "unavailable":
-        return 0.7, "метаданные недоступны — множитель 0.7", "источник не установлен"
-    c2pa = details.get("c2pa") or {}
-    camera = details.get("camera")
-    datetime_value = details.get("datetime")
-    gps = details.get("gps") or {}
-    has_geo = bool(gps.get("latitude") is not None and gps.get("longitude") is not None)
-
-    if camera and datetime_value and has_geo:
-        return 1.5, "камера, дата и GPS в метаданных на месте", f"снято на камеру {camera}"
-    if camera and datetime_value:
-        return 1.5, "камера и дата съёмки в метаданных на месте", f"снято на камеру {camera}"
-    if c2pa.get("present"):
-        return 1.0, "есть манифест C2PA, но камера и дата не подтверждены", "файл подписан C2PA"
-    if camera or datetime_value or has_geo:
-        return 1.0, "метаданные частичные", f"снято на камеру {camera}" if camera else "частичные метаданные"
-    return 0.7, "в файле нет метаданных источника — множитель 0.7", "источник не установлен"
-
-
-def demand(caption: str, location: str) -> tuple[float, str]:
-    """Спрос по категории события (ЧП ×1.8, городское ×1.2, иначе ×1.0)."""
-    text = f"{caption} {location}".lower()
+    text = f"{offer.get('caption') or ''} {offer.get('location') or ''}".lower()
+    demand, demand_why = 1.0, "категория события не распознана"
     for _key, (multiplier, label, words) in DEMAND_KEYWORDS.items():
         if any(word in text for word in words):
-            return multiplier, f"категория «{label}»"
-    return 1.0, "категория события не распознана"
+            demand, demand_why = multiplier, f"категория «{label}»"
+            break
+
+    multipliers = [fresh, uniq, prov, demand]
+    explanations = [
+        f"Свежесть ×{fresh:g}: {fresh_why}",
+        f"Уникальность ×{uniq:g}: {uniq_why}",
+        f"Происхождение ×{prov:g}: {prov_why}",
+        f"Спрос ×{demand:g}: {demand_why}",
+    ]
+    facts = {"unique": unique, "similar_in_archive": similar}
+    return multipliers, explanations, duplicate, facts
+
+
+def _factual_origin(check: dict[str, Any]) -> str:
+    """Человеческое описание происхождения по сигналу метаданных."""
+    meta = _details(check, "metadata")
+    camera = meta.get("camera")
+    if camera:
+        return f"снято на камеру {camera}"
+    if (meta.get("c2pa") or {}).get("present"):
+        return "файл подписан манифестом C2PA"
+    if (meta.get("gps") or {}).get("latitude") is not None:
+        return "в файле есть GPS-координаты"
+    return "источник не установлен"
+
+
+def _geo(check: dict[str, Any], location: str) -> str:
+    place = (location or "").strip()
+    gps = _details(check, "metadata").get("gps") or {}
+    lat, lon = gps.get("latitude"), gps.get("longitude")
+    if lat is None or lon is None:
+        return place or "не указано"
+    coords = f"{float(lat):.4f}, {float(lon):.4f}"
+    return f"{place} ({coords})" if place else coords
 
 
 def make_title(caption: str, location: str) -> str:
@@ -144,6 +181,10 @@ def make_title(caption: str, location: str) -> str:
     return f"{text} — фото с места"
 
 
+# --------------------------------------------------------------------------
+# Публичная сборка лота
+# --------------------------------------------------------------------------
+
 def build_listing(
     check: dict[str, Any],
     offer: dict[str, Any],
@@ -154,49 +195,51 @@ def build_listing(
     caption = offer.get("caption") or ""
     location = offer.get("location") or ""
 
-    shot_at = parse_dt(offer.get("shot_at"))
-    if shot_at is None:
-        shot_at = parse_dt((_signal(check, "metadata").get("details") or {}).get("datetime"))
+    pricing = _details(check, "pricing")
+    shot_at = parse_dt(pricing.get("shot_at")) or parse_dt(offer.get("shot_at")) \
+        or parse_dt(_details(check, "metadata").get("datetime"))
 
-    fresh_mult, fresh_why = freshness(shot_at, now)
-    uniq_mult, uniq_why, unique, similar, duplicate = uniqueness(check)
-    prov_mult, prov_why, origin = provenance(check)
-    demand_mult, demand_why = demand(caption, location)
+    local_facts: dict[str, Any] = {"unique": False, "similar_in_archive": 0}
+    if isinstance(pricing.get("price_rub"), int) and isinstance(pricing.get("why_price"), list):
+        price = int(pricing["price_rub"])
+        why_price = [str(line) for line in pricing["why_price"]]
+        listed = bool(pricing.get("listed", price > 0))
+        uniq = pricing.get("uniqueness") or {}
+        local_facts = {
+            "unique": bool(uniq.get("unique")),
+            "similar_in_archive": int(uniq.get("similar") or 0),
+        }
+        if not shot_at:
+            shot_at = parse_dt(pricing.get("shot_at"))
+    else:
+        multipliers, explanations, duplicate, local_facts = _local_multipliers(check, offer, now)
+        listed = not duplicate
+        raw = BASE_RUB
+        for multiplier in multipliers:
+            raw *= multiplier
+        price = 0 if duplicate else max(ROUND_TO, int(round(raw / ROUND_TO)) * ROUND_TO)
+        why_price = [f"База: {BASE_RUB} ₽"] + explanations
+        if listed:
+            why_price.append(f"Итого: {price} ₽")
 
-    if duplicate:
-        return None, uniq_why
+    if not listed:
+        reason = why_price[-1] if why_price else "материал не выставляется"
+        return None, reason
 
-    raw = BASE_RUB * fresh_mult * uniq_mult * prov_mult * demand_mult
-    price = max(ROUND_TO, int(round(raw / ROUND_TO)) * ROUND_TO)
+    trust = check.get("trust") or {
+        "score": 0, "uncertainty": 1.0, "coverage": 0.0, "level": "fog", "conflict": False,
+    }
 
-    details = _signal(check, "metadata").get("details") or {}
-    gps = details.get("gps") or {}
-    geo = location.strip()
-    if gps.get("latitude") is not None and gps.get("longitude") is not None:
-        coords = f"{float(gps['latitude']):.4f}, {float(gps['longitude']):.4f}"
-        geo = f"{geo} ({coords})" if geo else coords
-
-    trust = check.get("trust") or {"score": 0, "uncertainty": 1.0, "coverage": 0.0,
-                                   "level": "fog", "conflict": False}
-
-    plan = {
+    return {
         "title": make_title(caption, location),
         "price_rub": price,
         "trust": trust,
         "facts": {
-            "origin": origin,
+            "origin": _factual_origin(check),
             "shot_at": iso(shot_at),
-            "geo": geo or "не указано",
-            "unique": unique,
-            "similar_in_archive": similar,
+            "geo": _geo(check, location),
+            "unique": bool(local_facts.get("unique")),
+            "similar_in_archive": int(local_facts.get("similar_in_archive") or 0),
         },
-        "why_price": [
-            f"База: {BASE_RUB} ₽",
-            f"Свежесть ×{fresh_mult:g}: {fresh_why}",
-            f"Уникальность ×{uniq_mult:g}: {uniq_why}",
-            f"Происхождение ×{prov_mult:g}: {prov_why}",
-            f"Спрос ×{demand_mult:g}: {demand_why}",
-            f"Итого: {price} ₽",
-        ],
-    }
-    return plan, ""
+        "why_price": why_price,
+    }, ""
