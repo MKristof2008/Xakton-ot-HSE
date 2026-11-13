@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from ..schemas import InputType
 from .ai_artifacts import AIArtifactsSignal
 from .manipulation import ManipulationSignal
+from .pricing import PricingSignal
 from .provenance import MetadataSignal
 from .quotes import QuotesSignal
 from .rhetoric import RhetoricSignal
@@ -23,6 +24,7 @@ from .source_search import SourceSearchSignal
 from .text_claims import ClaimsSignal
 from .text_sources import SourcesSignal
 from .machine_text import MachineTextSignal
+from .uniqueness import UniquenessSignal
 
 SIGNALS: dict[str, list[type]] = {
     "image": [
@@ -31,6 +33,8 @@ SIGNALS: dict[str, list[type]] = {
         ManipulationSignal,
         SourceSearchSignal,
         ScreenshotSignal,
+        UniquenessSignal,
+        PricingSignal,
     ],
     "text": [
         ClaimsSignal,
@@ -51,7 +55,10 @@ SIGNALS: dict[str, list[type]] = {
 
 def default_signals(input_type: InputType | str) -> list[Signal]:
     """Возвращает список экземпляров сигналов для данного типа входа."""
-    classes = SIGNALS.get(str(input_type).lower().split("/")[-1], SIGNALS["text"])
+    # str(InputType.image) в Python 3.11+ даёт "InputType.image" — берём value.
+    raw = getattr(input_type, "value", input_type)
+    key = str(raw).lower().split("/")[-1]
+    classes = SIGNALS.get(key, SIGNALS["text"])
     return [cls() for cls in classes]
 
 

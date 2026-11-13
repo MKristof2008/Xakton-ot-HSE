@@ -1,13 +1,14 @@
-import type { ClaimStatus } from '../types';
-import { STATUS_ICONS, STATUS_LABELS } from '../lib/labels';
+import type { Verdict } from '../types';
+import { VERDICT_ICONS, VERDICT_LABELS } from '../lib/labels';
 
-export function StatusBadge({ status }: { status: ClaimStatus }) {
+/** Вердикт сигнала проверки. */
+export function StatusBadge({ verdict }: { verdict: Verdict }) {
   return (
-    <span className={`status status--${status}`}>
-      <span className="status__icon" aria-hidden="true">
-        {STATUS_ICONS[status]}
+    <span className={`verdict verdict--${verdict}`}>
+      <span className="verdict__icon" aria-hidden="true">
+        {VERDICT_ICONS[verdict]}
       </span>
-      {STATUS_LABELS[status]}
+      {VERDICT_LABELS[verdict]}
     </span>
   );
 }

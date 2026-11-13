@@ -32,7 +32,7 @@ async def test_pipeline_image_returns_check_result():
     result = await check(ctx)
     assert isinstance(result, CheckResult)
     assert result.input.type == InputType.image
-    assert len(result.signals) == 5
+    assert len(result.signals) == 7
     assert result.trust.uncertainty >= 0
 
 
