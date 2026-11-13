@@ -1,0 +1,21 @@
+services:
+  provereno:
+    build: .
+    container_name: provereno
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # LLM не нужен: пайплайн детерминированный.
+      # Если позже понадобится — добавь LLM_API_KEY, LLM_BASE_URL, LLM_MODEL.
+      VERDICT_DB: /data/verdict.db
+    volumes:
+      - provereno_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  provereno_data:

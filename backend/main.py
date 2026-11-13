@@ -20,6 +20,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 ML_DIR = Path(__file__).resolve().parent.parent / "ml"
@@ -331,3 +332,12 @@ async def pricing() -> dict[str, Any]:
         ],
         "note": "Первый месяц бесплатно: сначала репутация, потом подписка.",
     }
+
+# ---------- раздача собранного интерфейса ----------
+# В проде nginx обычно отдаёт статику сам, но если фронт собран в
+# frontend/dist, FastAPI может отдать его напрямую — удобно для одного
+# контейнера без отдельного веб-сервера.
+
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _DIST.is_dir():
+    app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="web")
