@@ -140,7 +140,12 @@ def load_archive(archive_dir: Any = None) -> tuple[list[dict[str, Any]], Optiona
         return [], f"манифест архива не читается: {manifest} ({type(exc).__name__})"
 
     if isinstance(payload, dict):
-        raw_items = payload.get("items") or payload.get("cases") or payload.get("archive")
+        # Пустой список — валидный архив («пока ничего нет»), поэтому ищем
+        # ключ по наличию, а не по истинности значения.
+        raw_items = next(
+            (payload[key] for key in ("items", "cases", "archive") if key in payload),
+            None,
+        )
     else:
         raw_items = payload
     if not isinstance(raw_items, list):

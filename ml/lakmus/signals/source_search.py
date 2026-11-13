@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import pathlib
@@ -28,6 +29,7 @@ from .base import BaseSignal, make_result
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_DISTANCE = 10           # порог Хэмминга для совпадения (из 64 бит)
 MAX_PIXELS = 40_000_000     # защита от гигантских картинок
+MAX_HASH_PIXELS = 40_000_000  # то же для Pillow-пути (JPEG/WebP)
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 KNOWN_CASES_PATH = DATA_DIR / "known_cases.json"
 
@@ -192,6 +194,26 @@ def resize_gray(gray: bytes, width: int, height: int, tw: int, th: int) -> bytes
 # --------------------------------------------------------------------------
 # хеши
 # --------------------------------------------------------------------------
+
+
+def _decode_with_pillow_gray(data: bytes) -> Optional[tuple[int, int, bytes]]:
+    """JPEG/WebP и прочее через Pillow → (ширина, высота, серые байты).
+
+    Возвращает None, если Pillow нет или файл не декодируется: сигнал тогда
+    честно сообщает, что хеш не посчитан, а не падает.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0 or width * height > MAX_HASH_PIXELS:
+                return None
+            return width, height, image.convert("L").tobytes()
+    except Exception:
+        return None
 
 
 def dhash_hex(gray: bytes, width: int, height: int) -> str:
@@ -383,10 +405,15 @@ class SourceSearchSignal(BaseSignal):
             phash = phash_hex(gray, width, height)
             dhash = dhash_hex(gray, width, height)
         except PngError as exc:
-            if data.startswith(b"\xff\xd8"):
-                hash_error = "JPEG-декодер недоступен без Pillow, хеш не посчитан"
-            else:
+            # PNG-декодер на stdlib не берёт JPEG/WebP. Pillow в проекте есть,
+            # поэтому пробуем его, а не сдаёмся сразу.
+            fallback = _decode_with_pillow_gray(data)
+            if fallback is None:
                 hash_error = f"не удалось посчитать хеш: {exc}"
+            else:
+                width, height, gray = fallback
+                phash = phash_hex(gray, width, height)
+                dhash = dhash_hex(gray, width, height)
         except (MemoryError, ValueError) as exc:
             hash_error = f"не удалось посчитать хеш: {type(exc).__name__}"
 

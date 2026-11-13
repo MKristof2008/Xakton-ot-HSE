@@ -17,7 +17,7 @@ async def test_pipeline_text_returns_check_result():
     assert isinstance(result, CheckResult)
     assert result.id == "test_text_01"
     assert result.status.value == "done"
-    assert len(result.signals) == 5
+    assert len(result.signals) == 6
     assert result.trust.score >= 0
     assert all(s.id for s in result.signals)
 

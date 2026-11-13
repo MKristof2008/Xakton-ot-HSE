@@ -42,6 +42,7 @@ SIGNALS: dict[str, list[type]] = {
         QuotesSignal,
         RhetoricSignal,
         MachineTextSignal,
+        PricingSignal,
     ],
     "url": [
         ClaimsSignal,

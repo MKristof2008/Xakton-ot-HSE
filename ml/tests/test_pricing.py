@@ -7,7 +7,6 @@
 import io
 import json
 
-import pytest
 from PIL import Image
 
 from lakmus.context import CheckContext

@@ -368,7 +368,9 @@ async def test_source_search_uses_external_provider():
 async def test_source_search_undecodable_image_is_unavailable():
     result = await SourceSearchSignal().run(make_ctx(b"\xff\xd8not-a-real-jpeg"))
     assert result.verdict == Verdict.unavailable
-    assert "Pillow" in result.details["reason"]
+    # Причина должна объяснять, что хеш не посчитан, а не падать трейсбеком.
+    reason = result.details["reason"]
+    assert "хеш" in reason or "Pillow" in reason
 
 
 # --------------------------------------------------------------------------

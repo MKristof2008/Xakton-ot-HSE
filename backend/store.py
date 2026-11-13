@@ -8,13 +8,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 BACKEND_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BACKEND_DIR / "data" / "witness.db"
@@ -110,14 +111,19 @@ def db_path() -> Path:
     return Path(os.environ.get("WITNESS_DB") or DEFAULT_DB_PATH)
 
 
-def connect() -> sqlite3.Connection:
-    """Открыть соединение и гарантировать схему."""
+@contextlib.contextmanager
+def connect() -> Iterator[sqlite3.Connection]:
+    """Соединение (с авто-COMMIT через `with`) и гарантированное закрытие."""
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+    try:
+        conn.executescript(SCHEMA)
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------------------

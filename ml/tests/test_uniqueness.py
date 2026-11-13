@@ -6,7 +6,6 @@
 import io
 import json
 
-import pytest
 from PIL import Image
 
 from lakmus.context import CheckContext
@@ -18,15 +17,6 @@ from lakmus.signals.uniqueness import (
     load_archive,
     match_archive,
 )
-
-
-def make_image(color=(200, 30, 30), size=(64, 64), pattern=None) -> bytes:
-    image = Image.new("RGB", size, color)
-    if pattern is not None:
-        image.putdata(pattern)
-    buffer = io.BytesIO()
-    image.save(buffer, "PNG")
-    return buffer.getvalue()
 
 
 def structured_image(shift: int = 0, size=(64, 64), fmt="PNG") -> bytes:
