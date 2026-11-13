@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Offer, OfferCheck, SignalResult, Trust } from '../types';
-import { createListing, describeError, fetchCheck, streamCheck } from '../api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Listing, Offer, OfferCheck, SignalResult, Trust } from '../types';
+import { createListing, describeError, fetchCheck, fetchListing, fetchListings, streamCheck } from '../api';
 import { formatRub } from '../lib/format';
-import { estimatePrice } from '../lib/pricing';
 import { SignalCard } from './SignalCard';
 import { TrustBadge } from './TrustBadge';
 
 interface CheckingScreenProps {
   offer: Offer;
   previewUrl: string | null;
-  /** Готовый результат — можно выставлять лот. */
-  onListed: (check: OfferCheck) => void;
+  /** Лот готов — открываем его карточку. */
+  onListed: (listingId: string) => void;
   onRestart: () => void;
 }
 
@@ -18,14 +17,16 @@ type Phase = 'streaming' | 'done' | 'failed';
 
 /**
  * Экран проверки: сигналы приходят по SSE и появляются по мере готовности.
- * Если поток оборвался — окончательный результат догружается через
- * GET /api/offers/{id}/check.
+ * Backend сам создаёт лот в конце проверки — мы показываем настоящие цену
+ * и why_price из лота, ничего не досчитывая на клиенте.
  */
 export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: CheckingScreenProps) {
   const offerId = offer.id;
   const [signals, setSignals] = useState<SignalResult[]>([]);
   const [trust, setTrust] = useState<Trust | null>(null);
   const [finalCheck, setFinalCheck] = useState<OfferCheck | null>(null);
+  const [listing, setListing] = useState<Listing | null>(null);
+  const [rejectReason, setRejectReason] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>('streaming');
   const [statusText, setStatusText] = useState('Ставим заявку в очередь');
   const [error, setError] = useState<string | null>(null);
@@ -35,13 +36,44 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
   const run = useCallback(
     (signal: AbortSignal) => {
       const attempt = ++attemptRef.current;
+
+      const applyFinal = async (check: OfferCheck) => {
+        setSignals(check.signals);
+        setTrust(check.trust);
+        setFinalCheck(check);
+        if (check.status === 'failed') {
+          setPhase('failed');
+          setError('Проверка не удалась на стороне сервера.');
+          return;
+        }
+        setPhase('done');
+        // Лот backend создаёт сам: ищем его по заявке.
+        try {
+          const all = await fetchListings(signal);
+          if (attempt !== attemptRef.current || signal.aborted) return;
+          const found = all.find((item) => item.offer_id === offerId);
+          if (found) setListing(found);
+        } catch {
+          // Лента недоступна — не страшно, покажем то, что уже есть.
+        }
+      };
+
       void (async () => {
         try {
-          const finalCheck = await streamCheck(
+          const result = await streamCheck(
             offerId,
             {
-              onStatus: (_status, message) => {
+              onStatus: (status, message) => {
                 if (message) setStatusText(message);
+                if (status === 'rejected' && message) setRejectReason(message);
+              },
+              onListing: (listingId) => {
+                if (attempt !== attemptRef.current) return;
+                void fetchListing(listingId, signal)
+                  .then((found) => {
+                    if (attempt === attemptRef.current) setListing(found);
+                  })
+                  .catch(() => undefined);
               },
               onSignal: (item) => {
                 if (attempt !== attemptRef.current) return;
@@ -51,7 +83,7 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
               onTrust: (value) => setTrust(value),
               onDone: (check) => {
                 if (attempt !== attemptRef.current) return;
-                applyFinal(check);
+                void applyFinal(check);
               },
               onError: (message) => {
                 if (attempt !== attemptRef.current) return;
@@ -61,7 +93,7 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
             signal,
           );
           if (attempt !== attemptRef.current || signal.aborted) return;
-          if (finalCheck) applyFinal(finalCheck);
+          if (result) await applyFinal(result);
           else await recover();
         } catch (caught) {
           if (signal.aborted || attempt !== attemptRef.current) return;
@@ -69,24 +101,16 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
         }
 
         async function recover(cause?: unknown) {
-          // поток мог закрыться раньше итога — пробуем обычный запрос
+          // поток закрылся раньше итога — пробуем обычный запрос
           try {
-            const check = await fetchCheck(offerId);
+            const check = await fetchCheck(offerId, signal);
             if (attempt !== attemptRef.current || signal.aborted) return;
-            applyFinal(check);
+            await applyFinal(check);
           } catch (fallbackError) {
             if (attempt !== attemptRef.current || signal.aborted) return;
             setPhase('failed');
             setError(describeError(cause ?? fallbackError));
           }
-        }
-
-        function applyFinal(check: OfferCheck) {
-          setSignals(check.signals);
-          setTrust(check.trust);
-          setFinalCheck(check);
-          setPhase(check.status === 'failed' ? 'failed' : 'done');
-          if (check.status === 'failed') setError('Проверка не удалась на стороне сервера.');
         }
       })();
     },
@@ -110,15 +134,17 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
         <p className="eyebrow">проверка заявки</p>
         <h1 className="screen__title">
           {phase === 'streaming' && 'Проверяем кадр'}
-          {phase === 'done' && 'Проверка завершена'}
+          {phase === 'done' && (listing ? 'Проверка завершена' : 'Материал не выставлен')}
           {phase === 'failed' && 'Проверка не удалась'}
         </h1>
         <p className="screen__lead">
           {phase === 'streaming'
-            ? 'Каждый сигнал появляется, как только его посчитали. Ничего не выдумываем — только то, что вернул сервер.'
+            ? 'Каждый сигнал появляется, как только его посчитали. Здесь только то, что вернул сервер.'
             : phase === 'done'
-              ? 'Ниже — итог проверки и цена, которую получит лот.'
-              : 'Материал не выставлен. Можно загрузить другой файл.'}
+              ? listing
+                ? 'Проверка сошлась, лот создан. Ниже — итог и объяснение цены.'
+                : 'Сервер не стал выставлять этот материал.'
+              : 'Заявку можно повторить с другим файлом.'}
         </p>
       </div>
 
@@ -151,7 +177,7 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
         </div>
 
         <div className="checking__body">
-          <div className="progress" aria-hidden={phase !== 'streaming'}>
+          <div className="progress">
             <div className="progress__row">
               <span className="progress__label" role="status" aria-live="polite">
                 {phase === 'streaming' ? statusText : phase === 'done' ? 'Готово' : 'Остановлено'}
@@ -165,7 +191,10 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
               aria-valuemax={100}
               aria-valuenow={progress}
             >
-              <span className={`progress__fill${phase === 'streaming' ? ' is-live' : ''}`} style={{ width: `${progress}%` }} />
+              <span
+                className={`progress__fill${phase === 'streaming' ? ' is-live' : ''}`}
+                style={{ width: `${progress}%` }}
+              />
             </div>
           </div>
 
@@ -185,7 +214,14 @@ export function CheckingScreen({ offer, previewUrl, onListed, onRestart }: Check
       </div>
 
       {phase === 'done' && trust && finalCheck && (
-        <EstimateBlock trust={trust} check={finalCheck} offer={offer} onListed={onListed} />
+        <EstimateBlock
+          trust={trust}
+          check={finalCheck}
+          offer={offer}
+          listing={listing}
+          rejectReason={rejectReason}
+          onListed={onListed}
+        />
       )}
     </div>
   );
@@ -195,29 +231,32 @@ interface EstimateProps {
   trust: Trust;
   check: OfferCheck;
   offer: Offer;
-  onListed: (check: OfferCheck) => void;
+  listing: Listing | null;
+  rejectReason: string | null;
+  onListed: (listingId: string) => void;
 }
 
-/** Блок «Оценка»: предварительная цена по контрактному правилу + выставление лота. */
-function EstimateBlock({ trust, check, offer, onListed }: EstimateProps) {
-  const [listing, setListing] = useState(false);
+/** Блок «Оценка»: цена и why_price из лота, созданного backend. */
+function EstimateBlock({ trust, check, offer, listing, rejectReason, onListed }: EstimateProps) {
+  const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const estimate = useMemo(() => estimatePrice(offer, check), [offer, check]);
+  const [created, setCreated] = useState<Listing | null>(null);
+  const shown = listing ?? created;
+
+  const usable = check.signals.filter((signal) => signal.verdict !== 'unavailable').length;
 
   const handleList = async () => {
-    setListing(true);
+    setPublishing(true);
     setError(null);
     try {
-      await createListing(offer.id);
-      onListed(check);
+      const result = await createListing(offer.id);
+      setCreated(result);
     } catch (caught) {
       setError(describeError(caught));
     } finally {
-      setListing(false);
+      setPublishing(false);
     }
   };
-
-  const usable = check.signals.filter((signal) => signal.verdict !== 'unavailable').length;
 
   return (
     <section className="card estimate" aria-labelledby="estimate-title">
@@ -225,25 +264,34 @@ function EstimateBlock({ trust, check, offer, onListed }: EstimateProps) {
         <div>
           <p className="eyebrow">оценка</p>
           <h2 className="estimate__title" id="estimate-title">
-            {estimate.blocked ? 'Материал не выставлен' : 'Материал можно выставить'}
+            {shown ? 'Материал выставлен' : 'Материал не выставлен'}
           </h2>
         </div>
         <TrustBadge score={trust.score} level={trust.level} />
       </div>
 
-      <div className="estimate__price">
-        <span className="estimate__amount">{formatRub(estimate.priceRub)}</span>
-        <span className="estimate__caption">предварительная цена по правилу контракта</span>
-      </div>
+      {shown ? (
+        <>
+          <div className="estimate__price">
+            <span className="estimate__amount">{formatRub(shown.price_rub)}</span>
+            <span className="estimate__caption">цена лота, рассчитана сервером</span>
+          </div>
 
-      <div className="why">
-        <h3 className="why__title">Почему такая цена</h3>
-        <ul className="why__list">
-          {estimate.whyPrice.map((line, index) => (
-            <li key={index}>{line}</li>
-          ))}
-        </ul>
-      </div>
+          <div className="why">
+            <h3 className="why__title">Почему такая цена</h3>
+            <ul className="why__list">
+              {shown.why_price.map((line, index) => (
+                <li key={index}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        </>
+      ) : (
+        <p className="card__text">
+          {rejectReason ??
+            'Сервер не создал лот по этой заявке. Причина выше в статусе проверки или в её сигналах.'}
+        </p>
+      )}
 
       <dl className="estimate__facts">
         <div>
@@ -269,14 +317,20 @@ function EstimateBlock({ trust, check, offer, onListed }: EstimateProps) {
       )}
 
       <div className="actions">
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => void handleList()}
-          disabled={listing || estimate.blocked}
-        >
-          {listing ? 'Выставляем…' : 'Выставить лот'}
-        </button>
+        {shown ? (
+          <button type="button" className="btn btn--primary" onClick={() => onListed(shown.id)}>
+            Открыть лот
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => void handleList()}
+            disabled={publishing}
+          >
+            {publishing ? 'Выставляем…' : 'Выставить лот'}
+          </button>
+        )}
       </div>
     </section>
   );

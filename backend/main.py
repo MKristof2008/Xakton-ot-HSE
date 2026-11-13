@@ -44,6 +44,7 @@ from paths import (
     MAX_REQUEST_BYTES,
     MAX_UPLOAD_BYTES,
     MEDIA_DIR,
+    ORIGINALS_DIR,
     demo_listings_path,
 )
 from pricing import build_listing, iso as iso_dt, parse_dt
@@ -53,8 +54,11 @@ from uploads import UploadError, prepare_upload
 MAX_FORM_FIELDS = 8
 #: Интервал heartbeat в SSE, сек.
 SSE_HEARTBEAT = 15.0
+#: Предел молчания SSE, сек: после него поток закрывается ошибкой.
+SSE_IDLE_LIMIT = 180.0
 
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+ORIGINALS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Свидетель — маркетплейс свидетельств", version="1.0.0")
 
@@ -198,6 +202,25 @@ def _offer_or_404(offer_id: str) -> dict[str, Any]:
     return offer
 
 
+def _replay_terminal(offer: dict[str, Any]) -> None:
+    """Восстановить итоговое событие по БД, если проверка уже завершена."""
+    offer_id = offer["id"]
+    if broker.is_finished(offer_id) or offer["status"] == "checking":
+        return
+    row = store.get_check_row(offer_id)
+    if row is None:
+        return
+    if row["status"] == "done" and row["result"] is not None:
+        broker.publish(offer_id, {
+            "kind": "done", "event": "done", "check": row["result"],
+        })
+    else:
+        broker.publish(offer_id, {
+            "kind": "error", "event": "error", "code": "CHECK_FAILED",
+            "message": "проверка завершилась ошибкой",
+        })
+
+
 # --------------------------------------------------------------------------
 # Фоновая проверка
 # --------------------------------------------------------------------------
@@ -229,6 +252,8 @@ async def process_offer(
         caption=caption,
         location=location,
         shot_at=shot_at,
+        overlay_dir=str(MEDIA_DIR / offer_id / "overlays"),
+        overlay_url_prefix=f"/media/{offer_id}/overlays",
     )
 
     async def on_signal_done(event: Any) -> None:
@@ -344,12 +369,13 @@ async def create_offer(request: Request, background: BackgroundTasks) -> dict[st
     check_id = store.new_id("chk")
     offer_dir = MEDIA_DIR / offer_id
     offer_dir.mkdir(parents=True, exist_ok=True)
+    originals_dir = ORIGINALS_DIR / offer_id
+    originals_dir.mkdir(parents=True, exist_ok=True)
 
     # На диск — только свои имена: пользовательское имя остаётся лишь в метаданных.
-    original_path = offer_dir / f"original.{prepared.original_ext}"
-    preview_path = offer_dir / "preview.jpg"
-    original_path.write_bytes(prepared.data)
-    preview_path.write_bytes(prepared.preview_jpeg)
+    # Оригинал лежит вне /media: он продаётся, а не раздаётся по прямой ссылке.
+    (originals_dir / f"original.{prepared.original_ext}").write_bytes(prepared.data)
+    (offer_dir / "preview.jpg").write_bytes(prepared.preview_jpeg)
     preview_url = f"/media/{offer_id}/preview.jpg"
 
     offer = store.create_offer(
@@ -412,15 +438,24 @@ async def offer_events(offer_id: str) -> StreamingResponse:
     queue = broker.subscribe(offer_id)
 
     async def stream():
+        idle_heartbeats = 0
         try:
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=SSE_HEARTBEAT)
                 except asyncio.TimeoutError:
-                    if broker.is_finished(offer_id):
+                    idle_heartbeats += 1
+                    # Проверка потерялась (перезапуск процесса): не держим поток вечно.
+                    if broker.is_finished(offer_id) or idle_heartbeats * SSE_HEARTBEAT >= SSE_IDLE_LIMIT:
+                        if not broker.is_finished(offer_id):
+                            yield sse_frame("error", {
+                                "kind": "error", "code": "CHECK_FAILED",
+                                "message": "проверка не завершилась",
+                            })
                         break
                     yield ": heartbeat\n\n"
                     continue
+                idle_heartbeats = 0
                 name = str(event.get("event") or "status")
                 yield sse_frame(name, event)
                 if event.get("kind") in ("done", "error"):

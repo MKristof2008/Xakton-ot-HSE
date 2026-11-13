@@ -35,3 +35,8 @@ build/
 # секреты
 .env
 __pycache__/
+
+# демо-база и загруженные файлы
+backend/data/
+backend/media/
+demo/_seed/

@@ -9,8 +9,10 @@ BACKEND_DIR = Path(__file__).resolve().parent
 REPO_DIR = BACKEND_DIR.parent
 ML_DIR = REPO_DIR / "ml"
 
-#: Каталог для загруженных файлов и превью (отдаётся StaticFiles по /media).
+#: Каталог для превью и оверлеев (отдаётся StaticFiles по /media).
 MEDIA_DIR = Path(os.environ.get("WITNESS_MEDIA") or BACKEND_DIR / "media")
+#: Оригиналы НЕ раздаются статикой: платный материал не должен утекать по ссылке.
+ORIGINALS_DIR = Path(os.environ.get("WITNESS_ORIGINALS") or BACKEND_DIR / "data" / "originals")
 #: JSON с предзаполненными лотами для демо (создаёт агент 4 в ml/data).
 DEMO_LISTINGS_PATH = Path(
     os.environ.get("WITNESS_DEMO_LISTINGS") or ML_DIR / "data" / "demo_listings.json"

@@ -61,8 +61,14 @@ def build_context(
     caption: str,
     location: str,
     shot_at: Optional[str],
+    overlay_dir: Optional[str] = None,
+    overlay_url_prefix: Optional[str] = None,
 ) -> CheckContext:
-    """Контекст проверки изображения. OCR не делаем: сигнал сам скажет unavailable."""
+    """Контекст проверки изображения. OCR не делаем: сигнал сам скажет unavailable.
+
+    `overlay_dir` — каталог оверлеев (heatmap) для этой заявки; он лежит внутри
+    /media, поэтому URL оверлея отдаётся тем же статик-роутом.
+    """
     check_input = CheckInput(
         type=InputType.image,
         sha256=sha256,
@@ -73,6 +79,9 @@ def build_context(
         "location": location,
         "shot_at": shot_at,
     }
+    if overlay_dir:
+        options["overlay_dir"] = overlay_dir
+        options["overlay_url_prefix"] = overlay_url_prefix or "/media"
     return CheckContext(
         check_id=check_id,
         input=check_input,

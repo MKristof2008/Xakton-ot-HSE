@@ -20,14 +20,21 @@ import {
 async function parseErrorBody(response: Response): Promise<ApiError> {
   let code = `HTTP_${response.status}`;
   let message = '';
+  let isJson = false;
   try {
     const body: unknown = await response.json();
+    isJson = true;
     if (isRecord(body) && isRecord(body.error)) {
       if (typeof body.error.code === 'string') code = body.error.code;
       if (typeof body.error.message === 'string') message = body.error.message;
     }
   } catch {
     // тело не JSON — остаётся HTTP-код
+  }
+
+  // Не-JSON ответ на 5xx обычно отдаёт прокси или шлюз: backend не отвечает.
+  if (!isJson && response.status >= 500) {
+    return new ApiError('NETWORK', 'Сервер не отвечает', response.status);
   }
 
   if (code.startsWith('HTTP_')) {
@@ -145,6 +152,8 @@ export type ProgressHandler = {
   onStatus?: (status: string, message: string) => void;
   onSignal: (signal: SignalResult) => void;
   onTrust?: (trust: Trust) => void;
+  /** Backend сам создаёт лот и присылает его id в событии status. */
+  onListing?: (listingId: string) => void;
   onDone?: (check: OfferCheck) => void;
   onError?: (message: string) => void;
 };
@@ -229,6 +238,9 @@ function dispatchEvent(event: RawEvent, handlers: ProgressHandler): void {
         typeof record.status === 'string' ? record.status : '',
         typeof record.message === 'string' ? record.message : '',
       );
+      if (typeof record.listing_id === 'string' && record.listing_id) {
+        handlers.onListing?.(record.listing_id);
+      }
       break;
     case 'signal':
       try {

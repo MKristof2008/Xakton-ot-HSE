@@ -12,6 +12,7 @@ frontend мог разбирать поток единообразно.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 #: Сколько событий держим в буфере на одну заявку.
@@ -61,20 +62,24 @@ class EventBroker:
         self._buffers.pop(offer_id, None)
         self._finished.discard(offer_id)
 
+    def reset(self) -> None:
+        """Очистить всё, не меняя объект: ссылки в других модулях остаются валидны."""
+        self._queues.clear()
+        self._buffers.clear()
+        self._finished.clear()
 
-#: Общий брокер процесса. Тесты подменяют его через reset().
+
+#: Общий брокер процесса.
 broker = EventBroker()
 
 
 def reset_broker() -> None:
-    global broker
-    broker = EventBroker()
+    """Сброс для тестов: объект тот же, ссылки из main.py остаются живыми."""
+    broker.reset()
 
 
 def sse_frame(event: str, payload: dict[str, Any]) -> str:
     """Кадр SSE: имя события + data в одну строку JSON."""
-    import json
-
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return f"event: {event}\ndata: {data}\n\n"
 

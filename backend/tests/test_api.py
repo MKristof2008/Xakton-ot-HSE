@@ -132,6 +132,13 @@ def test_create_offer(client):
     assert os.path.isfile(os.path.join(MEDIA_TMP, offer["id"], "preview.jpg"))
 
 
+def test_original_is_not_served_by_static(client):
+    """Платный оригинал не должен открываться по прямой ссылке — раздаём только превью."""
+    offer_id = _upload(client, _image_bytes("PNG")).json()["id"]
+    assert client.get(f"/media/{offer_id}/preview.jpg").status_code == 200
+    assert client.get(f"/media/{offer_id}/original.png").status_code == 404
+
+
 def test_offer_check_after_pipeline(client):
     offer_id = _upload(client, _image_bytes("PNG")).json()["id"]
     status = _wait_offer(client, offer_id)
@@ -199,6 +206,17 @@ def test_mime_spoofing_rejected(client):
 def test_mime_mismatch_rejected(client):
     response = _upload(client, _image_bytes("PNG"), "photo.jpg", "image/jpeg")
     assert response.status_code == 415
+
+
+def test_request_body_limit(client):
+    """Тело запроса сверх лимита отбивается до разбора — 413 в формате контракта."""
+    response = client.post(
+        "/api/offers",
+        content=b"x" * (17 * 1024 * 1024),
+        headers={"content-type": "multipart/form-data; boundary=x"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "TOO_LARGE"
 
 
 def test_too_large_file(client):
