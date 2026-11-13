@@ -51,8 +51,6 @@ from uploads import UploadError, prepare_upload
 
 #: Поля формы, которые допустимо отправлять вместе с файлом.
 MAX_FORM_FIELDS = 8
-#: Предел текстовых полей формы (защита от гигантских подписей).
-MAX_TEXT_FIELD = 4000
 #: Интервал heartbeat в SSE, сек.
 SSE_HEARTBEAT = 15.0
 

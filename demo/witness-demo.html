@@ -390,7 +390,9 @@ footer{padding-top:28px;color:var(--muted);font-size:12.5px;display:flex;flex-wr
     const h = hoursSince($("shot").value);
     const freshness = h < 1 ? 3.0 : h < 6 ? 2.0 : h < 24 ? 1.5 : h < 72 ? 1.0 : 0.5;
     const uniqMult = duplicate ? 0 : unique ? 2.0 : 1.0;
-    const provMult = (bytes.hasExif || bytes.hasC2pa) ? 1.5 : 0.7;
+    // Геолокацию в браузере подтвердить нечем, поэтому полной надбавки ×1.5
+    // не даём: метаданные есть — это частичное подтверждение (×1.0).
+    const provMult = (bytes.hasExif || bytes.hasC2pa) ? 1.0 : 0.7;
     const demand = parseFloat($("demand").value);
     const raw = 1500 * freshness * uniqMult * provMult * demand;
     const price = Math.round(raw / 100) * 100;
@@ -422,7 +424,7 @@ footer{padding-top:28px;color:var(--muted);font-size:12.5px;display:flex;flex-wr
       ? "Уникальность: такой кадр уже есть в архиве — лот не создаётся."
       : "Уникальность: совпадений в архиве нет.");
     reasons.push(bytes.hasExif || bytes.hasC2pa
-      ? "Провенанс: метаданные целы, происхождение подтверждается."
+      ? "Провенанс: метаданные на месте, но геометку браузер не проверяет — полной надбавки нет."
       : "Провенанс: метаданных нет, к цене применён понижающий коэффициент.");
     reasons.push(demand >= 1.8
       ? "Спрос: категория происшествий — редакции берут такие кадры быстрее всего."
