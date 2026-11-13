@@ -177,7 +177,7 @@ async def test_price_is_deterministic(tmp_path):
 
 
 async def test_rounding_to_hundred(tmp_path):
-    # 1500 × 1.0 (метаданных нет → 0.7) × 1.0 × 0.7 × 1.0 = 1050 → 1100
+    # 1500 × 1.0 (даты нет) × 2.0 (уникально) × 0.7 (метаданных нет) × 1.0 = 2100
     data = make_jpeg(exif=False)
     ctx = make_ctx(data, {
         "now": "2026-11-13T15:00:00Z",
@@ -187,9 +187,10 @@ async def test_rounding_to_hundred(tmp_path):
 
     price = result.details["price_rub"]
     assert price % 100 == 0
-    assert price == 700  # 1500 × 0.7 (provenance нет данных), freshness неизвестна = 1.0
+    assert price == 2100
     assert result.details["multipliers"]["freshness"] == 1.0
     assert result.details["multipliers"]["provenance"] == 0.7
+    assert result.details["why_price"]
 
 
 async def test_uses_prior_signals_when_given(tmp_path):

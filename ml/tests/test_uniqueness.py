@@ -184,8 +184,8 @@ async def test_partial_match_is_neutral(tmp_path):
     near = f"{int(hashes['dhash'], 16) ^ 0x1FF:016x}"  # 9 бит разницы
     archive_dir = write_archive(tmp_path, [{
         "id": "similar-shot",
-        "dhash": None,
-        "ahash": near,
+        "dhash": near,
+        "ahash": None,
         "date": "2022-01-01",
     }])
 

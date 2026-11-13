@@ -34,7 +34,7 @@ export function FeedScreen({ onOpenListing, onBuy, onUpload, onError }: FeedScre
       setLoading(true);
       setError(null);
       try {
-        const [feed, summary] = await Promise.all([fetchListings(), fetchStats()]);
+        const [feed, summary] = await Promise.all([fetchListings(signal), fetchStats(signal)]);
         if (signal.aborted) return;
         setListings(feed);
         setStats(summary);
