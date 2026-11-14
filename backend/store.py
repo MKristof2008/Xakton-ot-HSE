@@ -111,11 +111,45 @@ def create_user(plan: str = "free") -> dict[str, Any]:
 
 
 def user_by_token(token: str) -> Optional[dict[str, Any]]:
+    """Пользователь по токену. Истёкшая подписка понижается до free.
+
+    Раньше срок писался при оплате и нигде не проверялся: оплаченный
+    месяц не заканчивался никогда. Проверка здесь, а не в обработчике,
+    чтобы её видели все пути — и /api/check, и /api/me, и платежи.
+    """
     if not token:
         return None
     with connect() as conn:
         row = conn.execute("SELECT * FROM users WHERE token = ?", (token,)).fetchone()
-    return dict(row) if row else None
+        if row is None:
+            return None
+        user = dict(row)
+        if _subscription_expired(user):
+            conn.execute(
+                "UPDATE users SET plan = 'free', expires_at = NULL WHERE id = ?",
+                (user["id"],),
+            )
+            user["plan"] = "free"
+            user["expires_at"] = None
+    return user
+
+
+def _subscription_expired(user: dict[str, Any]) -> bool:
+    """True, если платный тариф истёк.
+
+    expires_at пишется в формате SQLite `YYYY-MM-DD HH:MM:SS` (UTC).
+    Сравниваем в SQL, чтобы не зависеть от формата строки в Python.
+    """
+    if user.get("plan", "free") == "free":
+        return False
+    expires = user.get("expires_at")
+    if not expires:
+        return False
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT datetime('now') > datetime(?) AS expired", (expires,)
+        ).fetchone()
+    return bool(row and row["expired"])
 
 
 PLAN_PRICES: dict[str, int] = {"free": 0, "pro": 300, "team": 5000}

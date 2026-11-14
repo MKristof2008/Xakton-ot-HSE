@@ -105,19 +105,82 @@ def find_topic(kb: dict[str, Any], text: str) -> Optional[dict[str, Any]]:
     return topics[0] if topics else None
 
 
+#: Окончания, которые срезаем перед сравнением. «Мобилизацию» и
+#: «мобилизация» — одно слово, но подстрока разная: без стема тема
+#: не находилась и фейк уходил в «непонятно».
+_RU_ENDINGS = (
+    "иями", "ями", "ами", "ов", "ев", "ий", "ия", "ию", "ии", "ей", "ой",
+    "ый", "ая", "ое", "ые", "ую", "юю", "ах", "ях", "ом", "ем", "ам", "ям",
+    "а", "я", "ы", "и", "у", "ю", "е", "о", "ь",
+)
+
+
+def _stem(word: str) -> str:
+    """Грубая основа слова: срезаем до 2 окончаний подряд.
+
+    Настоящей морфологии здесь нет и не нужно: цель — чтобы «мобилизацию»
+    и «мобилизация» дали одну основу. Слишком короткие слова не трогаем.
+    """
+    w = _norm(word)
+    if len(w) <= 4:
+        return w
+    for _ in range(2):
+        for end in _RU_ENDINGS:
+            if len(w) - len(end) >= 4 and w.endswith(end):
+                w = w[: -len(end)]
+                break
+    return w
+
+
+def _stems_in(text: str) -> set[str]:
+    return {_stem(w) for w in re.findall(r"[а-яa-z0-9]+", _norm(text)) if len(w) >= 4}
+
+
+def _words_in(text: str) -> set[str]:
+    return set(re.findall(r"[а-яa-z0-9]+", _norm(text)))
+
+
+def _keyword_matches(keyword: str, text: str, text_stems: set[str], text_words: set[str]) -> bool:
+    """Все значимые слова ключа есть в тексте.
+
+    Короткие слова («цб», «мрот») сравниваем точно, длинные — по основе.
+    Раньше ключ «ставка цб» сводился к одной основе «ставк», и фраза
+    «ставка выросла» находила тему ЦБ, хотя ЦБ в ней нет.
+    """
+    words = re.findall(r"[а-яa-z0-9]+", _norm(keyword))
+    if not words:
+        return False
+    for w in words:
+        if len(w) >= 4:
+            if _stem(w) not in text_stems:
+                return False
+        elif w not in text_words:
+            return False
+    return True
+
+
 def find_topics(kb: dict[str, Any], text: str) -> list[dict[str, Any]]:
     """Все темы, чьи ключевые слова встретились, от лучшей к худшей.
 
     Сообщение может задевать несколько тем («индексация пенсий и тарифы
     ЖКХ»), поэтому сигнал перебирает их, а не хватается за первую.
+    Сравнение идёт по основам слов: «мобилизацию» находит тему
+    «мобилизация», иначе половина падежных форм терялась.
     """
     low = _norm(text)
+    text_stems = _stems_in(text)
+    text_words = _words_in(text)
     scored: list[tuple[int, dict[str, Any]]] = []
     for topic in kb.get("topics", []):
         best = 0
         for keyword in topic.get("keywords", []):
             k = _norm(keyword)
-            if k and k in low:
+            if not k:
+                continue
+            # Прямое вхождение — самый надёжный сигнал, он весит больше.
+            if k in low:
+                best = max(best, len(k) * 2)
+            elif _keyword_matches(keyword, text, text_stems, text_words):
                 best = max(best, len(k))
         if best:
             scored.append((best, topic))
@@ -138,6 +201,30 @@ def _claim_matches_fact(claim: str, fact: dict[str, Any]) -> bool:
     if not markers:
         return True  # запись без маркеров считаем универсальной для темы
     return any(_norm(m) in low for m in markers)
+
+
+def _asserts_fact(text: str, fact: dict[str, Any]) -> bool:
+    """Сообщает ли текст тот же факт, а не просто упоминает тему.
+
+    «МРОТ с 1 января 2025 года — 22 440 рублей» сообщает факт: слова
+    совпадают с записью базы почти целиком. «Что там по МРОТ?» — только
+    называет тему, подтверждать нечего.
+    """
+    low = _norm(text)
+    # Вопрос — это не утверждение.
+    if low.rstrip().endswith("?") or "что скажешь" in low or "что там" in low:
+        return False
+    fact_claim = _norm(str(fact.get("claim", "")))
+    if not fact_claim:
+        return False
+    text_stems = _stems_in(text)
+    fact_stems = _stems_in(fact_claim)
+    if not fact_stems:
+        return False
+    # Текст должен называть большую часть слов факта. Упоминание одной темы
+    # даёт 10-20 %, пересказ того же факта — 60 % и выше.
+    overlap = len(text_stems & fact_stems) / len(fact_stems)
+    return overlap >= 0.5
 
 
 def _is_negated(text: str) -> bool:
@@ -256,16 +343,33 @@ def check_against_topic(topic: dict[str, Any], text: str) -> tuple[Verdict, floa
                 },
             )
 
-        # Чисел в утверждении нет — сверять нечего, но факт тот же.
+        # Чисел в утверждении нет — сверять нечего. Раньше здесь стояло
+        # «Совпадает с базой», и любое упоминание темы («Что там по МРОТ?»)
+        # получало вердикт «правда». Теперь проверяем, что в тексте вообще
+        # утверждается тот же факт, а не просто названа тема.
         if not claim_numbers and not claim_years:
+            if _asserts_fact(text, fact):
+                return (
+                    Verdict.supports_real,
+                    RELIABILITY_MATCH,
+                    f"Совпадает с базой: {fact['claim']}.",
+                    {
+                        "topic": topic["topic"],
+                        "matched_fact": fact,
+                        "reason": "matched",
+                        "source": fact.get("source"),
+                        "url": fact.get("url"),
+                    },
+                )
             return (
-                Verdict.supports_real,
-                RELIABILITY_MATCH,
-                f"Совпадает с базой: {fact['claim']}.",
+                Verdict.neutral,
+                RELIABILITY_TOPIC,
+                f"Тема найдена ({topic['topic']}), но утверждения о факте нет: "
+                f"{fact['claim']}.",
                 {
                     "topic": topic["topic"],
                     "matched_fact": fact,
-                    "reason": "matched",
+                    "reason": "topic_only",
                     "source": fact.get("source"),
                     "url": fact.get("url"),
                 },

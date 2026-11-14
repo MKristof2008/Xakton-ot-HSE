@@ -115,8 +115,8 @@ _FUTURE = re.compile(
 
 
 #: Безымянные заглушки: утверждение о «компании X» проверить нельзя.
-_VAGUE = re.compile(r"(компания [a-zх]|некая компания|некий|некие|"
-                    r"один человек|какой-то)", re.I)
+_VAGUE = re.compile(r"\b(компания [a-zх]\b|некая компания|некий|некие|"
+                    r"один человек|какой-то)\b", re.I)
 
 
 def _is_vague(text: str) -> bool:
@@ -247,6 +247,22 @@ def _negation_matters(claim: str, source_text: str) -> bool:
 def _is_negated(text: str) -> bool:
     low = _norm(text)
     return any(m in low for m in _NEGATIONS)
+
+
+def _apply_text_guards(text: str, finding: ClaimFinding) -> ClaimFinding:
+    """Защиты, которые зависят от исходного текста, а не от источника.
+
+    Вынесены в функцию: раньше они жили только в полном пути и в быстром
+    (по базе фактов) не применялись вообще.
+    """
+    if _is_vague(text):
+        finding.status = "insufficient"
+        finding.explanation = "В утверждении нет конкретных имён и чисел: проверить нечего."
+        return finding
+    if _is_future(text) and finding.status == "contradicted":
+        finding.status = "insufficient"
+        finding.explanation = "Это прогноз о будущем: проверить его сейчас нельзя."
+    return finding
 
 
 def judge_offline(claim: str, sources: Sequence[FetchedSource]) -> ClaimFinding:
@@ -392,14 +408,18 @@ _CACHE_TTL = 6 * 3600
 _CACHE_MAX = 500
 
 
-def _cache_key(text: str) -> str:
+def _cache_key(text: str, url: Optional[str] = None) -> str:
+    """Ключ кэша. URL входит в ключ: иначе проверка присланной ссылки
+    возвращала результат прошлого прогона того же текста без источников."""
     import hashlib
 
-    return hashlib.sha256(" ".join((text or "").lower().split()).encode()).hexdigest()
+    norm_text = " ".join((text or "").lower().split())
+    norm_url = (url or "").strip().lower()
+    return hashlib.sha256(f"{norm_text}\x00{norm_url}".encode()).hexdigest()
 
 
-def _cache_get(text: str) -> Optional["CheckOutcome"]:
-    key = _cache_key(text)
+def _cache_get(text: str, url: Optional[str] = None) -> Optional["CheckOutcome"]:
+    key = _cache_key(text, url)
     hit = _CACHE.get(key)
     if hit is None:
         return None
@@ -412,7 +432,7 @@ def _cache_get(text: str) -> Optional["CheckOutcome"]:
     return outcome
 
 
-def _cache_put(text: str, outcome: "CheckOutcome") -> None:
+def _cache_put(text: str, outcome: "CheckOutcome", url: Optional[str] = None) -> None:
     import time
 
     if not (text or "").strip():
@@ -420,7 +440,7 @@ def _cache_put(text: str, outcome: "CheckOutcome") -> None:
     if len(_CACHE) >= _CACHE_MAX:
         oldest = min(_CACHE, key=lambda k: _CACHE[k][0])
         _CACHE.pop(oldest, None)
-    _CACHE[_cache_key(text)] = (time.time(), outcome)
+    _CACHE[_cache_key(text, url)] = (time.time(), outcome)
 
 
 def llm_enabled() -> bool:
@@ -468,7 +488,7 @@ async def run_check(
     # Кэш: одинаковый текст должен давать одинаковый ответ. Поиск и модель
     # нестабильны между вызовами, а пользователь вправе получить тот же
     # результат, что и час назад.
-    cached = _cache_get(text)
+    cached = _cache_get(text, url)
     if cached is not None:
         cached.duration_ms = int((time.monotonic() - started) * 1000)
         return cached
@@ -478,18 +498,24 @@ async def run_check(
     #    неузнаваемое) и быстр (0 вызовов модели на известных фактах).
     kb_direct = _judge_with_kb(text)
     if kb_direct is not None and kb_direct.status in ("supported", "contradicted"):
-        level, verdict, score, uncertainty = _level_for([kb_direct])
-        return CheckOutcome(
-            claims=[kb_direct],
-            verdict=verdict,
-            level=level,
-            score=score,
-            uncertainty=uncertainty,
-            mode="offline",
-            sources_used=1,
-            limitations=list(kb_direct.limitations),
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
+        # Быстрый путь тоже обязан соблюдать те же защиты, что и полный:
+        # прогноз нельзя опровергать («мобилизацию объявят» — база
+        # «опровергает», хотя событие ещё не наступило), а составное
+        # утверждение нельзя подтверждать одной записью.
+        kb_direct = _apply_text_guards(text, kb_direct)
+        if kb_direct.status in ("supported", "contradicted"):
+            level, verdict, score, uncertainty = _level_for([kb_direct])
+            return CheckOutcome(
+                claims=[kb_direct],
+                verdict=verdict,
+                level=level,
+                score=score,
+                uncertainty=uncertainty,
+                mode="offline",
+                sources_used=1,
+                limitations=list(kb_direct.limitations),
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
 
     # 1. Утверждения
     claims: list[str] = []
@@ -562,7 +588,6 @@ async def run_check(
     # 3. Оценка
     findings: list[ClaimFinding] = []
     model_silent = False
-    future_text = _is_future(text)
 
     async def assess(claim: str) -> tuple[ClaimFinding, bool]:
         """Одно утверждение: база → источники → модель. Возвращает находку и
@@ -622,30 +647,19 @@ async def run_check(
                     finding.quote = ""
         return finding, False
 
-    # Прогноз или обещание не может быть ложью: событие ещё не наступило.
-    # «Завтра ожидается снег» — не фейк, даже если прогноз не сбудется.
-    # Безымянное утверждение не проверить: «компания X купила компанию Y».
-    if _is_vague(text):
-        for finding in findings:
-            finding.status = "insufficient"
-            finding.explanation = (
-                "В утверждении нет конкретных имён и чисел: проверить нечего."
-            )
-
-    if future_text:
-        for finding in findings:
-            if finding.status == "contradicted":
-                finding.status = "insufficient"
-                finding.explanation = (
-                    "Это прогноз о будущем: проверить его сейчас нельзя."
-                )
-
     # Утверждения оцениваются параллельно: три запроса к модели идут
     # одновременно, а не друг за другом.
     results = await asyncio.gather(*(assess(c) for c in claims))
     for finding, silent in results:
         findings.append(finding)
         model_silent = model_silent or silent
+
+    # Защиты применяются ПОСЛЕ оценки: раньше они стояли выше и проходили
+    # по ещё пустому списку findings — то есть не работали никогда.
+    # Прогноз или обещание не может быть ложью: событие ещё не наступило.
+    # Безымянное утверждение не проверить: «компания X купила компанию Y».
+    for finding in findings:
+        _apply_text_guards(text, finding)
 
     level, verdict, score, uncertainty = _level_for(findings)
     limitations = [lim for f in findings for lim in f.limitations]
@@ -667,5 +681,5 @@ async def run_check(
         limitations=limitations,
         duration_ms=int((time.monotonic() - started) * 1000),
     )
-    _cache_put(text, outcome)
+    _cache_put(text, outcome, url)
     return outcome
