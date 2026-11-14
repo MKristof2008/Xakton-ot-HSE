@@ -1,6 +1,9 @@
 import { apiBaseUrl } from '../config';
 import type {
+  ApiKey,
+  ApiKeyUsage,
   CheckResponse,
+  FeedResponse,
   Payment,
   Me,
   PricingResponse,
@@ -88,23 +91,53 @@ export async function getMe(): Promise<Me> {
   return request<Me>('/me');
 }
 
-/** Проверка текста, ссылки или скриншота. Все три входа — один контракт. */
+/** Проверка текста, ссылки, скриншота или видео. Все входы — один контракт. */
 export async function runCheck(
   text: string,
-  extra: { url?: string; image?: File } = {},
+  extra: { url?: string; image?: File; video?: File } = {},
 ): Promise<CheckResponse> {
   await ensureUser();
-  if (extra.image) {
+  if (extra.image || extra.video) {
     const body = new FormData();
     if (text) body.append('text', text);
     if (extra.url) body.append('url', extra.url);
-    body.append('image', extra.image);
+    if (extra.image) body.append('image', extra.image);
+    if (extra.video) body.append('video', extra.video);
     return request<CheckResponse>('/check', { method: 'POST', body });
   }
   return request<CheckResponse>('/check', {
     method: 'POST',
     body: JSON.stringify({ text, url: extra.url || undefined }),
   });
+}
+
+export async function getFeed(hours = 168): Promise<FeedResponse> {
+  return request<FeedResponse>(`/feed?hours=${hours}`);
+}
+
+export async function sendFeedback(payload: {
+  check_id: string;
+  verdict_ok: boolean;
+  expected?: string;
+  note?: string;
+}): Promise<{ ok: boolean }> {
+  await ensureUser();
+  return request('/feedback', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+export async function getApiKeys(): Promise<{ items: ApiKey[]; usage: ApiKeyUsage }> {
+  await ensureUser();
+  return request('/keys');
+}
+
+export async function createApiKey(label = ''): Promise<ApiKey> {
+  await ensureUser();
+  return request('/keys', { method: 'POST', body: JSON.stringify({ label }) });
+}
+
+export async function revokeApiKey(id: string): Promise<{ ok: boolean }> {
+  await ensureUser();
+  return request(`/keys/${id}`, { method: 'DELETE' });
 }
 
 export async function getTop(hours = 48): Promise<TopResponse> {

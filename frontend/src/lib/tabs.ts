@@ -1,8 +1,10 @@
-export type Tab = 'check' | 'top' | 'plans';
+export type Tab = 'check' | 'feed' | 'top' | 'plans' | 'access';
+
+const TABS: Tab[] = ['check', 'feed', 'top', 'plans', 'access'];
 
 export function readTab(): Tab {
   const hash = window.location.hash.replace('#', '');
-  return hash === 'top' || hash === 'plans' ? hash : 'check';
+  return TABS.includes(hash as Tab) ? (hash as Tab) : 'check';
 }
 
 export function hashFor(tab: Tab): string {

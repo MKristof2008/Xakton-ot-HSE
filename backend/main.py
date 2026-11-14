@@ -48,6 +48,7 @@ from lakmus.pipeline import check as run_check  # noqa: E402
 from lakmus.full_pipeline import run_check as run_full_check  # noqa: E402
 from lakmus.schemas import CheckInput, InputType  # noqa: E402
 from lakmus.sources import fetch_page  # noqa: E402
+from lakmus.llm_pipeline import explain_media  # noqa: E402
 
 import store  # noqa: E402
 from passport import passport_html  # noqa: E402
@@ -57,6 +58,8 @@ from sources_page import load_topics, page_html as sources_page_html  # noqa: E4
 MAX_TEXT = 4000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+MAX_VIDEO_BYTES = 25 * 1024 * 1024
+VIDEO_TYPES = ("video/mp4", "video/quicktime")
 
 app = FastAPI(title="Ревизор — фактчекинг API")
 
@@ -68,8 +71,8 @@ app.add_middleware(
         "http://localhost:4173",
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "X-Token"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Token", "X-Api-Key"],
 )
 
 
@@ -110,6 +113,17 @@ class PinRequest(BaseModel):
     title: str = ""
 
 
+class ApiKeyRequest(BaseModel):
+    label: str = ""
+
+
+class FeedbackRequest(BaseModel):
+    check_id: str
+    verdict_ok: bool
+    expected: Optional[str] = None
+    note: str = ""
+
+
 # ---------- сборка ответа ----------
 
 def level_label(level: str) -> str:
@@ -144,7 +158,7 @@ def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
         "plan": plan,
         "mode": outcome.mode,
     }
-    if plan != "pro":
+    if plan not in ("pro", "team"):
         base["upgrade_hint"] = (
             "Разбор — почему такой вердикт, источники и что проверить дальше — "
             "доступен по подписке."
@@ -169,7 +183,7 @@ def public_payload(result: Any, check_id: str, plan: str) -> dict[str, Any]:
         "uncertainty": round(result.trust.uncertainty, 4),
         "plan": plan,
     }
-    if plan != "pro":
+    if plan not in ("pro", "team"):
         base["upgrade_hint"] = (
             "Разбор — почему такой вердикт, источники и что проверить дальше — "
             "доступен по подписке."
@@ -205,7 +219,18 @@ def public_payload(result: Any, check_id: str, plan: str) -> dict[str, Any]:
 
 
 def resolve_user(token: Optional[str]) -> Optional[dict[str, Any]]:
+    """Пользователь по X-Token или по корпоративному ключу X-Api-Key."""
     return store.user_by_token(token or "")
+
+
+def resolve_any_user(
+    token: Optional[str], api_key: Optional[str] = None
+) -> Optional[dict[str, Any]]:
+    """Токен браузера или API-ключ корпорации — оба дают доступ к тарифу."""
+    user = resolve_user(token)
+    if user:
+        return user
+    return store.user_by_api_key(api_key or "")
 
 
 # ---------- эндпоинты ----------
@@ -223,6 +248,7 @@ async def health() -> dict[str, Any]:
 async def check_text(
     request: Request,
     x_token: Optional[str] = Header(default=None, alias="X-Token"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
 ) -> Any:
     """Проверить утверждение. Free — вердикт, pro — полный разбор.
 
@@ -231,6 +257,8 @@ async def check_text(
     """
     image: Optional[bytes] = None
     image_name = ""
+    video: Optional[bytes] = None
+    video_name = ""
     content_type = (request.headers.get("content-type") or "").lower()
 
     if content_type.startswith("multipart/form-data"):
@@ -251,6 +279,16 @@ async def check_text(
                 return fail("BAD_INPUT", "картинка больше 8 МБ", 422)
             if not image:
                 return fail("BAD_INPUT", "пустой файл", 422)
+        clip = form.get("video")
+        if clip is not None and not isinstance(clip, str):
+            if (clip.content_type or "") not in VIDEO_TYPES:
+                return fail("BAD_INPUT", "видео должно быть MP4 или MOV", 422)
+            video = await clip.read()
+            video_name = clip.filename or "clip.mp4"
+            if len(video) > MAX_VIDEO_BYTES:
+                return fail("BAD_INPUT", "видео больше 25 МБ", 422)
+            if not video:
+                return fail("BAD_INPUT", "пустой файл", 422)
     else:
         try:
             req = CheckRequest(**(await request.json()))
@@ -263,12 +301,12 @@ async def check_text(
     url = (url or "").strip() or None
     if url and not url.startswith(("http://", "https://")):
         return fail("BAD_INPUT", "ссылка должна начинаться с http:// или https://", 422)
-    if not image and not url and len(text) < 8:
+    if not image and not video and not url and len(text) < 8:
         return fail("BAD_INPUT", "слишком короткий текст: нужно хотя бы 8 символов", 422)
     if len(text) > MAX_TEXT:
         return fail("BAD_INPUT", f"текст длиннее {MAX_TEXT} символов", 422)
 
-    user = resolve_user(x_token)
+    user = resolve_any_user(x_token, x_api_key)
     plan = user["plan"] if user else "free"
 
     if user and plan == "free" and store.free_quota_left(user["id"]) <= 0:
@@ -280,18 +318,40 @@ async def check_text(
 
     check_id = f"chk_{int(time.time() * 1000) % 10**10:010d}"
     try:
-        if image:
-            # Картинка: сигналы изображения — метаданные, следы генерации,
-            # монтаж, контекст публикации. Текст со скриншота идёт в OCR.
+        if image or video:
+            # Файл: сигналы изображения или видео. Картинка — метаданные,
+            # следы генерации, монтаж, контекст публикации. Видео — метаданные
+            # контейнера и проверка, не является ли ролик статичной картинкой.
+            # Текст подписи идёт в OCR для картинки и остаётся в паспорте.
+            kind = InputType.video if video else InputType.image
             ctx = CheckContext(
                 check_id=check_id,
-                input=CheckInput(type=InputType.image, filename=image_name),
-                data=image,
+                input=CheckInput(
+                    type=kind,
+                    filename=video_name if video else image_name,
+                ),
+                data=video or image,
                 text=text,
             )
             result = await run_check(ctx)
             payload = public_payload(result, check_id, plan)
-            subject = text or f"[изображение] {image_name}"
+            kind_label = "видео" if video else "изображение"
+            subject = text or f"[{kind_label}] {video_name or image_name}"
+
+            # Модель переводит отчёт детекторов на человеческий язык.
+            # Детекторы решают, что нашли; модель объясняет, что это значит.
+            # Без ключа шаг просто пропускается — вердикт остаётся прежним.
+            media_note = await explain_media(
+                result.signals, caption=text, kind=kind_label
+            )
+            if media_note:
+                payload["explanation"] = media_note["explanation"]
+                payload["explanation_source"] = "model"
+                if plan in ("pro", "team"):
+                    payload["model_verdict"] = media_note["verdict"]
+            else:
+                payload["explanation_source"] = "detectors"
+
             store.save_check(
                 text=subject,
                 verdict=payload["verdict"],
@@ -300,6 +360,7 @@ async def check_text(
                 level=result.trust.level.value,
                 full=public_payload(result, check_id, "pro"),
                 user_id=user["id"] if user else None,
+                check_id=check_id,
             )
         else:
             # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
@@ -318,6 +379,7 @@ async def check_text(
                 level=outcome.level,
                 full=outcome_payload(outcome, check_id, "pro"),
                 user_id=user["id"] if user else None,
+                check_id=check_id,
             )
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
@@ -341,7 +403,7 @@ async def get_check(
     user = resolve_user(x_token)
     plan = user["plan"] if user else "free"
     full = row["full"]
-    if plan != "pro":
+    if plan not in ("pro", "team"):
         return {k: v for k, v in full.items() if k not in (
             "signals", "debate", "provenance", "next_steps", "limits", "duration_ms"
         )} | {"plan": plan, "upgrade_hint": "Разбор доступен по подписке."}
@@ -370,6 +432,123 @@ async def pin(req: PinRequest) -> Any:
 @app.get("/api/stats")
 async def stats() -> dict[str, Any]:
     return store.stats()
+
+
+@app.get("/api/feed")
+async def feed(limit: int = 30, hours: int = 168) -> dict[str, Any]:
+    """Лента проверенного: что уже разобрали и с каким итогом.
+
+    Эксперт на встрече: «дайте проверенные новости сегодня, или топ-новостей,
+    или топ-запросов». Топы — это рейтинг сомнений, а лента — витрина
+    результата: сюда попадает то, что проверили, с вердиктом и источником.
+    """
+    limit = max(1, min(100, limit))
+    hours = max(1, min(24 * 90, hours))
+    items = store.feed_items(limit=limit, hours=hours)
+    for item in items:
+        item["level_label"] = level_label(item.get("level") or "fog")
+        item["passport"] = f"/p/{item['text_hash']}"
+    verified = [i for i in items if i["level"] in ("confirmed", "likely_real")]
+    refuted = [i for i in items if i["level"] == "likely_fake"]
+    return {
+        "window_hours": hours,
+        "items": items,
+        "verified": len(verified),
+        "refuted": len(refuted),
+        "unclear": len(items) - len(verified) - len(refuted),
+    }
+
+
+# ---------- обратная связь: основа дообучения ----------
+
+@app.post("/api/feedback")
+async def create_feedback(
+    req: FeedbackRequest,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-Api-Key"),
+) -> Any:
+    """Человек сказал, верный ли вердикт. Это корпус для дообучения.
+
+    Модель по одному отзыву не меняется: собираем корпус, разбираем его
+    отдельным шагом. Иначе один случайный клик перекосил бы весь сервис.
+    """
+    row = store.get_check(req.check_id)
+    if not row:
+        return fail("NOT_FOUND", "проверка не найдена", 404)
+    if req.expected and req.expected not in ("правда", "фейк", "непонятно"):
+        return fail("BAD_INPUT", "expected: правда, фейк или непонятно", 422)
+
+    user = resolve_any_user(x_token, x_api_key)
+    feedback_id = store.save_feedback(
+        check_id=req.check_id,
+        text=row["text"],
+        verdict=row["verdict"],
+        level=row["level"],
+        verdict_ok=req.verdict_ok,
+        expected=req.expected,
+        note=req.note,
+        user_id=user["id"] if user else None,
+    )
+    return {
+        "id": feedback_id,
+        "ok": True,
+        "note": "Спасибо — это попадёт в разбор ошибок.",
+    }
+
+
+@app.get("/api/feedback/stats")
+async def feedback_stats(days: int = 30) -> dict[str, Any]:
+    """Точность по отзывам людей: сколько вердиктов признали верными."""
+    return store.feedback_stats(days=max(1, min(365, days)))
+
+
+# ---------- корпоративный доступ по API-ключу ----------
+
+@app.post("/api/keys")
+async def create_key(
+    req: ApiKeyRequest,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Выпустить API-ключ. Доступно тарифу «Редакция».
+
+    Ключ показывается один раз: в базе лежит только его хеш.
+    """
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    if user["plan"] != "team":
+        return fail(
+            "PLAN_REQUIRED",
+            "API-ключи доступны на тарифе «Редакция»",
+            402,
+        )
+    return store.create_api_key(user["id"], req.label)
+
+
+@app.get("/api/keys")
+async def list_keys(
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    return {
+        "items": store.list_api_keys(user["id"]),
+        "usage": store.api_key_usage(user["id"]),
+    }
+
+
+@app.delete("/api/keys/{key_id}")
+async def delete_key(
+    key_id: str,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    if not store.revoke_api_key(user["id"], key_id):
+        return fail("NOT_FOUND", "ключ не найден или уже отозван", 404)
+    return {"ok": True}
 
 
 @app.post("/api/users")

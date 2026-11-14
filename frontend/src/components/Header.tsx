@@ -4,8 +4,10 @@ import { BrandMark } from './icons';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'check', label: 'Проверить' },
+  { id: 'feed', label: 'Лента' },
   { id: 'top', label: 'Топы' },
   { id: 'plans', label: 'Тарифы' },
+  { id: 'access', label: 'Доступ' },
 ];
 
 interface Props {

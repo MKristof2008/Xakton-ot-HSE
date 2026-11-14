@@ -56,6 +56,10 @@ export interface CheckResponse {
   /** Разобранные утверждения — только в pro-тарифе. */
   claims?: ClaimFinding[];
   sources_used?: number;
+  /** Объяснение по фото или видео: от модели или от детекторов. */
+  explanation?: string;
+  explanation_source?: 'model' | 'detectors';
+  model_verdict?: 'real' | 'fake' | 'unclear';
 }
 
 export interface ClaimFinding {
@@ -88,6 +92,52 @@ export interface TopItem {
 export interface TopResponse {
   window_hours: number;
   items: TopItem[];
+}
+
+/** Лента проверенного: что разобрали и с каким итогом. */
+export interface FeedItem {
+  text_hash: string;
+  sample_text: string;
+  checks_count: number;
+  last_at: string;
+  verdict: Verdict;
+  score: number;
+  level: Level;
+  level_label: string;
+  passport: string;
+}
+
+export interface FeedResponse {
+  window_hours: number;
+  items: FeedItem[];
+  verified: number;
+  refuted: number;
+  unclear: number;
+}
+
+/** Корпоративный ключ: сам ключ приходит только при выпуске. */
+export interface ApiKey {
+  id: string;
+  key?: string;
+  prefix: string;
+  label: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface ApiKeyUsage {
+  days: number;
+  checks: number;
+}
+
+export interface FeedbackStats {
+  days: number;
+  total: number;
+  ok: number;
+  wrong: number;
+  accuracy: number | null;
+  by_level: Record<string, { total: number; ok: number; wrong: number }>;
 }
 
 export interface Stats {

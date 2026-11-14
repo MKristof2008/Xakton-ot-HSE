@@ -6,8 +6,10 @@ import type { Tab } from './lib/tabs';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { CheckScreen } from './components/CheckScreen';
+import { FeedScreen } from './components/FeedScreen';
 import { TopScreen } from './components/TopScreen';
 import { PlansScreen } from './components/PlansScreen';
+import { AccessScreen } from './components/AccessScreen';
 import './styles/global.css';
 
 export default function App() {
@@ -49,8 +51,10 @@ export default function App() {
 
       <main className="main" id="content">
         {tab === 'check' && <CheckScreen me={me} onMe={setMe} />}
+        {tab === 'feed' && <FeedScreen />}
         {tab === 'top' && <TopScreen />}
         {tab === 'plans' && <PlansScreen me={me} onMe={setMe} />}
+        {tab === 'access' && <AccessScreen me={me} />}
       </main>
 
       <Footer />

@@ -33,6 +33,11 @@
           ],
           "default": null,
           "title": "Extracted Text"
+        },
+        "filename": {
+          "default": "",
+          "title": "Filename",
+          "type": "string"
         }
       },
       "required": [
@@ -95,7 +100,8 @@
       "enum": [
         "image",
         "text",
-        "url"
+        "url",
+        "video"
       ],
       "title": "InputType",
       "type": "string"
@@ -230,7 +236,6 @@
           "type": "string"
         },
         "details": {
-          "additionalProperties": true,
           "title": "Details",
           "type": "object"
         },

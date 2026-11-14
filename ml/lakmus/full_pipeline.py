@@ -622,8 +622,6 @@ async def run_check(
                     finding.quote = ""
         return finding, False
 
-    # Прогноз или обещание не может быть ложью: событие ещё не наступило.
-    # «Завтра ожидается снег» — не фейк, даже если прогноз не сбудется.
     # Безымянное утверждение не проверить: «компания X купила компанию Y».
     if _is_vague(text):
         for finding in findings:
@@ -632,6 +630,18 @@ async def run_check(
                 "В утверждении нет конкретных имён и чисел: проверить нечего."
             )
 
+    # Утверждения оцениваются параллельно: три запроса к модели идут
+    # одновременно, а не друг за другом.
+    results = await asyncio.gather(*(assess(c) for c in claims))
+    for finding, silent in results:
+        findings.append(finding)
+        model_silent = model_silent or silent
+
+    # Прогноз или обещание не может быть ложью: событие ещё не наступило.
+    # «Завтра ожидается снег» — не фейк, даже если прогноз не сбудется.
+    # Важно: проверка идёт ПОСЛЕ оценки. Раньше она стояла до неё, когда
+    # findings был пуст, и не срабатывала вовсе — модель объявляла фейком
+    # «Мобилизацию объявят со следующей недели».
     if future_text:
         for finding in findings:
             if finding.status == "contradicted":
@@ -639,13 +649,6 @@ async def run_check(
                 finding.explanation = (
                     "Это прогноз о будущем: проверить его сейчас нельзя."
                 )
-
-    # Утверждения оцениваются параллельно: три запроса к модели идут
-    # одновременно, а не друг за другом.
-    results = await asyncio.gather(*(assess(c) for c in claims))
-    for finding, silent in results:
-        findings.append(finding)
-        model_silent = model_silent or silent
 
     level, verdict, score, uncertainty = _level_for(findings)
     limitations = [lim for f in findings for lim in f.limitations]

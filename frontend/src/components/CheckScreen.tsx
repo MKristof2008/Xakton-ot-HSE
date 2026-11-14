@@ -15,12 +15,13 @@ interface Props {
 /** Минимальная выдержка скелетона: вердикт должен ощущаться как решение системы. */
 const MIN_SKELETON_MS = 620;
 
-type Mode = 'text' | 'url' | 'image';
+type Mode = 'text' | 'url' | 'image' | 'video';
 
 const TABS: { id: Mode; label: string }[] = [
   { id: 'text', label: 'Текст' },
   { id: 'url', label: 'Ссылка' },
   { id: 'image', label: 'Скриншот' },
+  { id: 'video', label: 'Видео' },
 ];
 
 function delay(ms: number): Promise<void> {
@@ -62,6 +63,7 @@ export function CheckScreen({ me, onMe }: Props) {
       const value = (raw ?? text).trim();
       const link = mode === 'url' ? url.trim() : '';
       const image = mode === 'image' ? file : null;
+      const clip = mode === 'video' ? file : null;
 
       if (mode === 'url' && !/^https?:\/\/\S+$/i.test(link)) {
         setError('Нужна ссылка, начинающаяся с http:// или https://');
@@ -69,6 +71,10 @@ export function CheckScreen({ me, onMe }: Props) {
       }
       if (mode === 'image' && !image) {
         setError('Выберите скриншот: PNG, JPEG, WebP или GIF до 8 МБ.');
+        return;
+      }
+      if (mode === 'video' && !clip) {
+        setError('Выберите видео: MP4 или MOV до 25 МБ.');
         return;
       }
       if (mode === 'text' && value.length < 8) {
@@ -82,7 +88,11 @@ export function CheckScreen({ me, onMe }: Props) {
 
       try {
         const [data] = await Promise.all([
-          runCheck(value, { url: link || undefined, image: image ?? undefined }),
+          runCheck(value, {
+            url: link || undefined,
+            image: image ?? undefined,
+            video: clip ?? undefined,
+          }),
           reduced ? Promise.resolve() : delay(MIN_SKELETON_MS),
         ]);
         setResult(data);
@@ -133,7 +143,7 @@ export function CheckScreen({ me, onMe }: Props) {
     // Перепроверяем тем же способом ввода, что и в первый раз.
     if (mode === 'text' && text.trim().length < 8) return;
     if (mode === 'url' && !url.trim()) return;
-    if (mode === 'image' && !file) return;
+    if ((mode === 'image' || mode === 'video') && !file) return;
 
     setBusy(true);
     setResult(null);
@@ -142,6 +152,7 @@ export function CheckScreen({ me, onMe }: Props) {
         await runCheck(text.trim(), {
           url: mode === 'url' ? url.trim() : undefined,
           image: mode === 'image' ? file ?? undefined : undefined,
+          video: mode === 'video' ? file ?? undefined : undefined,
         }),
       );
     } catch {
@@ -262,6 +273,34 @@ export function CheckScreen({ me, onMe }: Props) {
               <p className="field__note">
                 Проверяем метаданные файла, следы генерации и монтажа, контекст
                 публикации. Текст со скриншота распознаётся, если на сервере есть OCR.
+              </p>
+            </>
+          )}
+
+          {mode === 'video' && (
+            <>
+              <label className="field__label" htmlFor="check-video">
+                <span>Видео</span>
+                <span className="field__hint">MP4, MOV · до 25 МБ</span>
+              </label>
+              <div className="file-drop">
+                <input
+                  id="check-video"
+                  type="file"
+                  accept="video/mp4,video/quicktime"
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] ?? null);
+                    setError(null);
+                  }}
+                />
+                <span className="file-drop__btn">Выбрать файл</span>
+                <span className={`file-drop__name${file ? ' file-drop__name--chosen' : ''}`}>
+                  {file ? `${file.name} · ${Math.round(file.size / 1024)} КБ` : 'Файл не выбран'}
+                </span>
+              </div>
+              <p className="field__note">
+                Читаем метаданные ролика, ищем следы генерации и монтажа, проверяем,
+                не является ли ролик статичной картинкой. Звук и речь не анализируются.
               </p>
             </>
           )}

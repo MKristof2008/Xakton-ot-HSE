@@ -24,6 +24,7 @@ from .source_search import SourceSearchSignal
 from .text_claims import ClaimsSignal
 from .text_sources import SourcesSignal
 from .machine_text import MachineTextSignal
+from .video import VideoSignal
 
 SIGNALS: dict[str, list[type]] = {
     "image": [
@@ -48,6 +49,9 @@ SIGNALS: dict[str, list[type]] = {
         QuotesSignal,
         RhetoricSignal,
         MachineTextSignal,
+    ],
+    "video": [
+        VideoSignal,
     ],
 }
 

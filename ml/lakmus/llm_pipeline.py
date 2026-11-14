@@ -281,3 +281,71 @@ async def evaluate_one_with_llm(
         "quote": str(data.get("quote", ""))[:400],
         "explanation": str(data.get("explanation", ""))[:300],
     }
+
+
+# ---------------------------------------------------------------- фото и видео
+
+MEDIA_SYSTEM = (
+    "Ты проверяешь медиа на подлинность. На вход дают результаты "
+    "автоматических детекторов (метаданные файла, следы генерации, "
+    "монтажа, статичность кадров) и подпись к материалу.\n"
+    "Твоя задача — объяснить по-русски, что эти признаки значат и можно "
+    "ли на них опираться. Ты НЕ видишь сам файл: только отчёт детекторов.\n"
+    "Правила:\n"
+    "- Отсутствие метаданных — не доказательство подделки: мессенджеры их стирают.\n"
+    "- Монтаж в редакторе — не признак фейка: так обрабатывают и настоящие снимки.\n"
+    "- Не утверждай того, чего нет в отчёте детекторов.\n"
+    "- Если признаков мало, так и скажи: доказательств недостаточно.\n"
+    'Ответ строго JSON: {"verdict":"real|fake|unclear","explanation":"..."}'
+)
+
+
+def _media_summary(signals: Sequence[Any], caption: str, kind: str) -> str:
+    """Отчёт детекторов одной строкой — то, что увидит модель."""
+    lines = [f"Тип материала: {kind}"]
+    if caption:
+        lines.append(f"Подпись: {caption[:400]}")
+    for signal in signals:
+        details = getattr(signal, "details", None) or {}
+        verdict = getattr(getattr(signal, "verdict", None), "value", "unknown")
+        summary = getattr(signal, "summary", "")
+        lines.append(f"- {getattr(signal, 'name', signal)}: {verdict}. {summary}")
+        # Только короткие факты, без дампов.
+        for key in ("generator_hits", "editor_hits", "static_video", "no_metadata"):
+            if key in details and details[key]:
+                lines.append(f"  {key}: {details[key]}")
+    return "\n".join(lines)[:2500]
+
+
+async def explain_media(
+    signals: Sequence[Any], caption: str = "", kind: str = "изображение"
+) -> Optional[dict[str, Any]]:
+    """Объяснить вердикт по фото или видео словами модели.
+
+    Возвращает {"verdict": ..., "explanation": ...} или None, если модели
+    нет или она не ответила. Сигналы детекторов уже посчитаны — модель
+    не заменяет их, а переводит их отчёт на человеческий язык.
+    """
+    api_key, base_url, model = _settings()
+    if not (api_key and base_url and model):
+        return None
+
+    user = _media_summary(signals, caption, kind)
+    raw = await _post(MEDIA_SYSTEM, user)
+    if not raw:
+        return None
+
+    data = _json_from(raw)
+    if not data:
+        text = _explanation_from_text(raw)
+        if not text:
+            return None
+        return {"verdict": "unclear", "explanation": text}
+
+    verdict = str(data.get("verdict", "")).strip().lower()
+    if verdict not in ("real", "fake", "unclear"):
+        verdict = "unclear"
+    explanation = str(data.get("explanation", "")).strip()[:600]
+    if not explanation:
+        return None
+    return {"verdict": verdict, "explanation": explanation}

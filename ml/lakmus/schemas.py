@@ -16,6 +16,7 @@ class InputType(str, Enum):
     image = "image"
     text = "text"
     url = "url"
+    video = "video"
 
 
 class Stage(str, Enum):
@@ -96,6 +97,8 @@ class CheckInput(BaseModel):
     sha256: str = ""
     preview_url: Optional[str] = None
     extracted_text: Optional[str] = None
+    # Имя файла: нужно для паспорта и чтобы в отчёте было видно, что проверяли.
+    filename: str = ""
 
 
 class DebateThesis(BaseModel):

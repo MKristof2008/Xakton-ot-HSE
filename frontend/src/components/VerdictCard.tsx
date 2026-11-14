@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { upgrade } from '../api/client';
+import { upgrade, sendFeedback } from '../api/client';
 import type { CheckResponse, ClaimFinding, Signal } from '../types';
 import { useCountUp } from '../hooks/useCountUp';
 import {
@@ -76,6 +76,15 @@ export function VerdictCard({ result, onUpgraded }: Props) {
         <Breakdown result={result} />
       )}
 
+      {result.explanation && (
+        <section className="explain">
+          <span className="explain__label">
+            {result.explanation_source === 'model' ? 'Объяснение модели' : 'Что показали детекторы'}
+          </span>
+          <p className="explain__text">{result.explanation}</p>
+        </section>
+      )}
+
       {result.passport && (
         <PassportLink
           path={result.passport}
@@ -86,7 +95,64 @@ export function VerdictCard({ result, onUpgraded }: Props) {
           }
         />
       )}
+
+      <FeedbackRow checkId={result.id} />
     </section>
+  );
+}
+
+// ---------------------------------------------------------------- обратная связь
+
+/**
+ * «Вердикт верный?» — это не голосование за результат, а корпус ошибок.
+ *
+ * На встрече эксперт спрашивал, как модель будет дообучаться. Здесь
+ * собираются случаи, где человек знает лучше: текст, наш вердикт и
+ * ожидаемый. Обучение идёт отдельным шагом, а не по одному клику.
+ */
+function FeedbackRow({ checkId }: { checkId: string }) {
+  const [sent, setSent] = useState<'ok' | 'wrong' | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  async function vote(ok: boolean) {
+    setFailed(false);
+    try {
+      await sendFeedback({ check_id: checkId, verdict_ok: ok });
+      setSent(ok ? 'ok' : 'wrong');
+    } catch {
+      setFailed(true);
+    }
+  }
+
+  if (sent) {
+    return (
+      <div className="feedback feedback--done">
+        <span className="feedback__thanks">
+          {sent === 'ok'
+            ? 'Спасибо — отметили как верный.'
+            : 'Спасибо — попадёт в разбор ошибок.'}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="feedback">
+      <span className="feedback__question">Вердикт верный?</span>
+      <div className="feedback__actions">
+        <button className="btn btn--ghost btn--small" type="button" onClick={() => void vote(true)}>
+          Да, верно
+        </button>
+        <button className="btn btn--ghost btn--small" type="button" onClick={() => void vote(false)}>
+          Нет, ошибка
+        </button>
+      </div>
+      {failed && (
+        <span className="feedback__error" role="alert">
+          Не удалось отправить. Попробуйте ещё раз.
+        </span>
+      )}
+    </div>
   );
 }
 
