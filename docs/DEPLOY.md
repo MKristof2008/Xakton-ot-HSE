@@ -16,7 +16,10 @@
 apt update && apt install -y git docker.io docker-compose-v2
 git clone https://github.com/MKristof2008/Xakton-ot-HSE.git app
 cd app
-git checkout feat/expert
+
+# ключи модели — только через .env, в git он не попадает
+cp ml/.env.example ml/.env
+nano ml/.env          # вписать LLM_API_KEY
 
 docker compose up -d --build
 docker compose logs -f          # смотреть, как поднимается
@@ -30,10 +33,14 @@ curl -s localhost:8000/api/health
 ```bash
 apt update && apt install -y python3.12 python3.12-venv nginx git
 git clone https://github.com/MKristof2008/Xakton-ot-HSE.git app
-cd app && git checkout feat/expert
+cd app
 
 python3.12 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
+
+# ключи модели
+cp ml/.env.example ml/.env
+nano ml/.env          # вписать LLM_API_KEY
 
 # собрать фронт (нужен node 20+)
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -117,9 +124,28 @@ cd app && git pull && docker compose up -d --build
 
 - **База живёт в томе** `provereno_data` (Docker) или `data/verdict.db`.
   При пересборке контейнера данные сохраняются.
+- **Банк знаний** (`ml/lakmus/data/knowledge_bank.json`) пополняется при
+  проверках. В git едет только шаблон `.example`; рабочий файл создаётся
+  сам. Чтобы не потерять его при пересборке, вынесите на том:
+  `VERDICT_BANK=/data/knowledge_bank.json` в `environment`.
 - **Один воркер.** Хранилище — SQLite, топы считаются по нему же. Если понадобится
   несколько воркеров, выносить состояние в Postgres и считать топы отдельно.
 - **Резервная копия:** `docker compose exec provereno cp /data/verdict.db /data/backup.db`
   и забрать файл, либо `sqlite3 data/verdict.db .dump`.
-- **Секретов нет.** Ключей в проекте нет, поэтому `.env` не нужен. Если позже
-  добавите LLM — только через переменные окружения, никогда в код.
+- **Ключи только в `.env`.** `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`.
+  Уровни тарифов можно развести: `LLM_MODEL_BASE`, `LLM_MODEL_PLUS`,
+  `LLM_MODEL_MAX`. Файл `.env` в git не попадает.
+- **Аккаунты для жюри** создаются скриптом:
+  `python -I ml/tools/prepare_demo.py --all --apply`. Он же чистит
+  демо-следы и печатает логины с паролем.
+
+## Аккаунты для жюри
+
+| Логин | Пароль | Тариф |
+|---|---|---|
+| `jury-base@revizor.demo` | `revizor-2026` | База |
+| `jury-plus@revizor.demo` | `revizor-2026` | Плюс |
+| `jury-max@revizor.demo` | `revizor-2026` | Макс |
+| `jury-max-2@revizor.demo` | `revizor-2026` | Макс |
+
+Инструкция для жюри — [`JURY_GUIDE.md`](JURY_GUIDE.md).

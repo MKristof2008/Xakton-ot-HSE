@@ -108,7 +108,7 @@ def test_number_mismatch_is_fake():
 
 def test_unknown_topic_is_unavailable_not_fake():
     """Главное правило: чего нет в базе — не значит «фейк»."""
-    result = run("Вчера в Казани открыли новый мост через реку")
+    result = run("Вчера в Крыму видели стаю диких уток")
     assert result.verdict == Verdict.unavailable
     assert result.details["reason"] == "topic_not_found"
 

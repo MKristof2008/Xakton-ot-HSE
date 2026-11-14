@@ -194,7 +194,9 @@ def test_known_true_is_confirmed():
 
 def test_unknown_topic_is_not_fake():
     """Главное: чего нет в источниках — «непонятно», а не «фейк»."""
-    result = run("Вчера в Казани открыли новый мост через реку.")
+    # Текст намеренно не из базы фактов и без признаков жанра фейка:
+    # проверяем именно честное «не знаю».
+    result = run("Вчера в Крыму видели стаю диких уток.")
     assert result.verdict == "непонятно"
     assert result.claims[0].status == "insufficient"
 

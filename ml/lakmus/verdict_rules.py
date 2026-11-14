@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional, Sequence
 
+from . import fake_markers
+
 
 @dataclass
 class RuleHit:
@@ -70,6 +72,8 @@ class RuleVerdict:
 
 #: Сила признака, при которой правило решает само, без суммы.
 DECISIVE = 0.7
+#: Ниже этого вес — только пометка, а не основание для вердикта.
+WEAK = 0.5
 
 
 # --------------------------------------------------------------- медиа
@@ -170,6 +174,7 @@ def rules_for_text(
     bank_hit: bool = False,
     is_future: bool = False,
     is_vague: bool = False,
+    text: str = "",
 ) -> RuleVerdict:
     """Правила для текста и ссылок: только по найденным источникам."""
     hits: list[RuleHit] = []
@@ -204,6 +209,9 @@ def rules_for_text(
         ))
 
     # 3. Прогноз нельзя объявить ложью: событие ещё не наступило.
+    #    Это правило строгое и без исключений: даже если база говорит
+    #    обратное, «повысят до 70» — прогноз, а не фейк. Ошибка в сторону
+    #    осторожности дешевле ошибки в сторону обвинения.
     if is_future:
         hits.append(RuleHit(
             "future", "Прогноз",
@@ -241,6 +249,31 @@ def rules_for_text(
             "neutral", 0.0,
             "Источников по теме не нашлось. Это не значит, что новость ложная.",
         ))
+        # Признаки жанра вирусной выдумки работают только когда проверить
+        # нечем: если источник есть, его слово важнее стиля текста.
+        #
+        # Вес зависит от того, насколько признак однозначен:
+        #   * неправдоподобная мера (запрет наличных, роспуск Госдумы,
+        #     комендантский час) — сильный признак, решает сама;
+        #   * два и более независимых признака — весомо вместе;
+        #   * один стилистический признак («учёные нашли») — только
+        #     пометка, вердикт по нему не ставится.
+        markers = fake_markers.find_markers(text or "")
+        if markers:
+            keys = {m.key for m in markers}
+            if "absurd_measure" in keys:
+                weight, title = 0.7, "Неправдоподобная мера"
+            elif len(markers) >= 2:
+                weight, title = 0.6, "Несколько признаков выдумки"
+            else:
+                # Один признак жанра — только пометка. Вес ниже порога
+                # решения (55), иначе «Учёные нашли воду на Марсе» —
+                # правдоподобная новость — получала бы «фейк».
+                weight, title = 0.3, "Признак вирусной выдумки"
+            hits.append(RuleHit(
+                "fake_markers", title, "fake", weight,
+                fake_markers.explain(markers),
+            ))
     elif not trusted:
         hits.append(RuleHit(
             "no_trusted", "Недоверенные источники",
@@ -326,8 +359,22 @@ def _combine(
     if fake_weight:
         if block_fake:
             return _blocked(block_reason)
+        # Слабый признак (один стилистический маркер) — не основание для
+        # приговора. Возвращаем «непонятно» с честным объяснением, что
+        # именно насторожило. Так «Учёные нашли воду на Марсе» — реальная
+        # новость — не превращается в «фейк» из-за слова «учёные».
+        if fake_weight < WEAK:
+            result.verdict = "непонятно"
+            result.confidence = 25
+            result.summary = (
+                f"Непонятно: {fake_hits[0].reason} Но одного этого признака "
+                "мало для вывода — нужны источники."
+            )
+            return result
         result.verdict = "фейк"
-        result.confidence = round(min(85, 40 + fake_weight * 40))
+        strong = fake_weight >= DECISIVE or len(fake_hits) >= 2
+        base = 55 if strong else 40
+        result.confidence = round(min(85, base + fake_weight * 30))
         result.summary = f"Фейк: {fake_hits[0].reason}"
         return result
 

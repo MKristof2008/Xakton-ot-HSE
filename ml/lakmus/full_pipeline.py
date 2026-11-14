@@ -25,6 +25,7 @@ from typing import Any, Optional, Sequence
 
 from . import bank as bank_module
 from . import reputation
+from . import verdict_rules
 from .reasoning import judge
 from .tags import classify as classify_tag
 from .tariffs import BASE, Tier
@@ -553,6 +554,7 @@ def _level_for(
     tag_confident: bool = False,
     kb_hit: bool = False,
     bank_hit: bool = False,
+    rule_result: Any = None,
 ) -> tuple[str, str, int, float]:
     """Уровень, вердикт, балл и неуверенность из набора находок.
 
@@ -560,6 +562,11 @@ def _level_for(
     (``reasoning.judge``): цитаты, согласие источников, надёжность доменов,
     полнота. Поэтому число объяснимо, а при отсутствии данных оно честно
     низкое, а не нейтральное.
+
+    ``rule_result`` — результат явных правил (``verdict_rules``). Если
+    правила нашли весомый признак, их вердикт главнее: они объясняют
+    причину («следы генератора», «признаки вирусной выдумки»), тогда как
+    рубрика только считает баллы.
 
     ``searched`` — были ли источники вообще. Только тогда отсутствие
     подтверждения можно считать признаком выдумки: если искать было негде,
@@ -583,6 +590,20 @@ def _level_for(
     supported = sum(1 for f in findings if f.status == "supported")
     contradicted = sum(1 for f in findings if f.status == "contradicted")
     unknown = sum(1 for f in findings if f.status == "insufficient")
+
+    # Правила могут вынести вердикт сами — но только если он обоснован
+    # сильным признаком, а не одним стилистическим маркером. Порог 55:
+    # столько даёт абсурдная мера (0.7) или два независимых маркера (0.6).
+    rule_verdict = getattr(rule_result, "verdict", "") if rule_result else ""
+    rule_confidence = getattr(rule_result, "confidence", 0) if rule_result else 0
+    if rule_verdict in ("фейк", "правда") and rule_confidence >= 55:
+        level = "likely_fake" if rule_verdict == "фейк" else "likely_real"
+        score = (
+            max(0, 100 - rule_confidence)
+            if rule_verdict == "фейк"
+            else rule_confidence
+        )
+        return level, rule_verdict, score, 0.25
 
     if contradicted and not supported:
         # Доверие к утверждению — обратная величина уверенности опровержения.
@@ -953,6 +974,24 @@ async def run_check(
     # Строгий режим не применяется к прогнозам и безымянным утверждениям:
     # «завтра ожидается снег» — не фейк, даже если подтверждения нет.
     strict_allowed = not _is_future(text) and not _is_vague(text)
+
+    # Явные правила вывода: признаки жанра вирусной выдумки, опора на
+    # цитаты, готовое знание. Работают поверх находок и не зависят от
+    # модели, поэтому вердикт воспроизводим.
+    rule_result = verdict_rules.rules_for_text(
+        claims=findings,
+        sources=len(sources),
+        trusted=len(evidence_sources),
+        # База фактов уже ответила? Тогда её слово перевешивает правило
+        # «прогноз нельзя объявить ложью»: «пенсионный возраст повысят
+        # до 70» опровергается действующим законом.
+        kb_hit=any(f.source_url and is_trusted(f.source_url) for f in findings),
+        bank_hit=False,
+        is_future=_is_future(text),
+        is_vague=_is_vague(text),
+        text=text,
+    )
+
     level, verdict, score, uncertainty = _level_for(
         findings,
         searched=bool(evidence_sources),
@@ -961,6 +1000,7 @@ async def run_check(
         trusted=len(evidence_sources),
         tag=tag_match.tag,
         tag_confident=tag_match.is_confident,
+        rule_result=rule_result,
     )
     limitations = [lim for f in findings for lim in f.limitations]
     # Понятная причина «непонятно»: пользователь должен знать, почему
