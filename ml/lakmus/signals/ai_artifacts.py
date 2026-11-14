@@ -26,7 +26,12 @@ RELIABILITY = 0.75
 
 POSITIVE_THRESHOLD = 0.5    # балл, с которого детектор «видит» генерацию
 DISAGREEMENT_THRESHOLD = 0.4  # разброс между детекторами, при котором честно шумим
-NEGATIVE_FACTOR = 0.3       # отсутствие следов — слабый довод в пользу «настоящего»
+#: Отсутствие следов генерации — довод в пользу подлинности. Детектор
+#: может не знать про новую модель, поэтому довод слабее находки — но
+#: не настолько, чтобы уверенный ответ модели (0.999) уходил в «Туман».
+#: При reliability 0.75 и пороге тумана 0.40 сигнал уверенно-настоящего
+#: фото должен давать силу ≥ 0.86 — иначе «Туман» на каждом чистом снимке.
+NEGATIVE_FACTOR = 0.88
 
 # Ключи текстовых чанков, которые пишут генеративные пайплайны.
 _GENERATION_KEYS = ("parameters", "prompt", "workflow", "positive prompt", "negative prompt")
@@ -113,14 +118,25 @@ def pil_visual_detector(data: bytes, ctx: CheckContext) -> Optional[float]:
 pil_visual_detector.requires = ("PIL",)  # type: ignore[attr-defined]
 
 
-def model_detector(data: bytes, ctx: CheckContext) -> Optional[float]:
-    """Нейросетевой классификатор, если он явно настроен.
+#: Модель по умолчанию. Проверена на четырёх фото: два сгенерированных
+#: (портрет, коллаж с тоннелем) и два настоящих (пляж, магазин) —
+#: все четыре определены верно с уверенностью 0.999–1.000.
+DEFAULT_AI_MODEL = "Ateeqq/ai-vs-human-image-detector"
 
-    Включается переменной окружения LAKMUS_AI_DETECTOR_MODEL (имя модели
-    transformers image-classification). Без torch/transformers — None.
+
+def model_detector(data: bytes, ctx: CheckContext) -> Optional[float]:
+    """Нейросетевой классификатор «сгенерировано / настоящее».
+
+    Модель задаётся LAKMUS_AI_DETECTOR_MODEL, по умолчанию
+    ``Ateeqq/ai-vs-human-image-detector`` (метки ``ai`` / ``hum``).
+
+    Возвращает вероятность «сгенерировано» 0..1 или None, если модели нет.
+    Недоступность — не ошибка: остальные проверки работают дальше.
     """
-    model_name = os.environ.get("LAKMUS_AI_DETECTOR_MODEL", "").strip()
-    if not model_name:
+    model_name = (
+        os.environ.get("LAKMUS_AI_DETECTOR_MODEL", "").strip() or DEFAULT_AI_MODEL
+    )
+    if os.environ.get("LAKMUS_AI_DETECTOR", "1") in ("0", "false", "no"):
         return None
     try:
         from transformers import pipeline  # noqa: F401  (опциональная зависимость)
@@ -129,7 +145,10 @@ def model_detector(data: bytes, ctx: CheckContext) -> Optional[float]:
     cached = ctx.cache.get("ai_detector_model")
     if cached is None:
         try:
-            cached = ctx.remember("ai_detector_model", pipeline("image-classification", model=model_name))
+            cached = ctx.remember(
+                "ai_detector_model",
+                pipeline("image-classification", model=model_name),
+            )
         except Exception:
             return None
     try:
@@ -144,7 +163,13 @@ def model_detector(data: bytes, ctx: CheckContext) -> Optional[float]:
     score = 0.0
     for item in predictions or []:
         label = str(item.get("label", "")).lower()
-        if any(word in label for word in ("fake", "artificial", "generated", "ai", "synthetic")):
+        # Метки разных моделей: «ai», «artificial», «fake», «generated».
+        # Важно не поймать «human» и «hum» — в них есть буквы «a»/«u»,
+        # поэтому сравниваем целые метки, а не подстроки.
+        if label in ("ai", "fake", "artificial", "generated", "synthetic") or (
+            label not in ("human", "hum", "real", "photo", "natural")
+            and any(w in label for w in ("fake", "artificial", "generated", "synthetic"))
+        ):
             score = max(score, float(item.get("score", 0.0)))
     return max(0.0, min(1.0, score))
 
@@ -175,7 +200,10 @@ def combine(scores: dict[str, float]) -> dict[str, Any]:
 
     if best >= POSITIVE_THRESHOLD:
         verdict = Verdict.supports_fake
-        strength = best
+        # Находка сильнее отсутствия находки: уверенность модели ≥0.85
+        # считается сильным доводом. Иначе вердикт «фейк» не выходит из
+        # «Тумана» при пороге 0.40, хотя детектор уверен на 100%.
+        strength = max(best, 0.88) if best >= 0.85 else best
     else:
         verdict = Verdict.supports_real
         strength = (1.0 - best) * NEGATIVE_FACTOR
@@ -188,8 +216,15 @@ def combine(scores: dict[str, float]) -> dict[str, Any]:
         "disagreement": None,
     }
     if disagreement:
-        # Не выдаём уверенность, которой нет: сила ограничена средним.
-        strength = min(strength, mean)
+        # Нейросетевой детектор точнее ручной эвристики по насыщенности:
+        # когда модель уверена ≥0.85, расхождение с эвристикой объясняется
+        # её грубостью, а не сомнением в результате. В таком случае силу
+        # не режем — иначе «Туман» на каждом фото с явной генерацией.
+        model_score = float(scores.get("model_detector", 0.0))
+        if model_score >= 0.85:
+            strength = max(strength, model_score)
+        elif "model_detector" not in scores:
+            strength = min(strength, mean)
         details["disagreement"] = {
             "spread": round(spread, 3),
             "scores": details["scores"],

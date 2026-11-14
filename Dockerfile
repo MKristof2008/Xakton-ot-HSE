@@ -21,7 +21,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt
+# CPU-сборка torch: без CUDA, образ меньше на ~1.5 ГБ.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu "torch==2.5.1+cpu"  && pip install --no-cache-dir -r backend/requirements.txt
+
+# Модель детектора ИИ-генерации вшивается в образ: на сервере без
+# интернета контейнер иначе завис бы на скачивании при первом запросе.
+ENV HF_HOME=/app/.hf
+RUN python -c "from transformers import pipeline; pipeline('image-classification', model='Ateeqq/ai-vs-human-image-detector')"  && du -sh /app/.hf
 
 COPY ml/ ./ml/
 COPY backend/ ./backend/
