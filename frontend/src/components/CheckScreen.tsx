@@ -17,11 +17,14 @@ interface Props {
 /** Минимальная выдержка скелетона: вердикт должен ощущаться как решение системы. */
 const MIN_SKELETON_MS = 620;
 
-type Mode = 'text' | 'url' | 'image' | 'video';
+/** Ссылка из мессенджера: «поделиться» вставляет адрес в буфер. */
+const LINK_RE = /^https?:\/\/\S+$/i;
 
-const TABS: { id: Mode; label: string }[] = [
+/** Что можно приложить к проверке: текст, скриншот или видео. */
+type Mode = 'text' | 'image' | 'video';
+
+const FILE_TABS: { id: Mode; label: string }[] = [
   { id: 'text', label: 'Текст' },
-  { id: 'url', label: 'Ссылка' },
   { id: 'image', label: 'Скриншот' },
   { id: 'video', label: 'Видео' },
 ];
@@ -51,8 +54,10 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
   // ?q=... кладётся в sessionStorage до рендера — забираем его ровно один раз.
   const [preset] = useState(readPreset);
   const [text, setText] = useState(() => preset ?? '');
+  // Отдельное поле для ссылки: человек жмёт «поделиться» и вставляет адрес,
+  // не задумываясь, что это не текст сообщения.
+  const [link, setLink] = useState('');
   const [mode, setMode] = useState<Mode>('text');
-  const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<CheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,14 +70,11 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
   const submit = useCallback(
     async (raw?: string) => {
       const value = (raw ?? text).trim();
-      const link = mode === 'url' ? url.trim() : '';
       const image = mode === 'image' ? file : null;
       const clip = mode === 'video' ? file : null;
+      // Ссылку можно проверить и без текста — бэкенд вытащит его со страницы.
+      const onlyUrl = !value && !image && !clip && LINK_RE.test(link.trim());
 
-      if (mode === 'url' && !/^https?:\/\/\S+$/i.test(link)) {
-        setError('Нужна ссылка, начинающаяся с http:// или https://');
-        return;
-      }
       if (mode === 'image' && !image) {
         setError('Выберите скриншот: PNG, JPEG, WebP или GIF до 8 МБ.');
         return;
@@ -81,8 +83,12 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
         setError('Выберите видео: MP4 или MOV до 25 МБ.');
         return;
       }
-      if (mode === 'text' && value.length < 8) {
-        setError('Нужно хотя бы 8 символов — иначе проверять нечего.');
+      if (!onlyUrl && !image && !clip && value.length < 8) {
+        setError(
+          link.trim()
+            ? 'Ссылка должна начинаться с http:// или https://'
+            : 'Нужно хотя бы 8 символов или ссылка — иначе проверять нечего.',
+        );
         return;
       }
 
@@ -102,7 +108,7 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
       try {
         const [data] = await Promise.all([
           runCheck(value, {
-            url: link || undefined,
+            url: link.trim() || undefined,
             image: image ?? undefined,
             video: clip ?? undefined,
           }),
@@ -123,7 +129,7 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
         setBusy(false);
       }
     },
-    [text, mode, url, file, me, onMe, reduced],
+    [text, link, mode, file, me, onMe, reduced],
   );
 
   // ?q=... сразу запускает проверку — так удобно делиться вердиктом.
@@ -164,19 +170,20 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
     } catch {
       /* тариф обновится при следующем запросе */
     }
-    // Перепроверяем тем же способом ввода, что и в первый раз.
-    if (mode === 'text' && text.trim().length < 8) return;
-    if (mode === 'url' && !url.trim()) return;
-    if ((mode === 'image' || mode === 'video') && !file) return;
+    const trimmed = text.trim();
+    const image = mode === 'image' ? file : null;
+    const clip = mode === 'video' ? file : null;
+    const onlyUrl = !trimmed && !image && !clip && LINK_RE.test(link.trim());
+    if (!onlyUrl && !image && !clip && trimmed.length < 8) return;
 
     setBusy(true);
     setResult(null);
     try {
       setResult(
-        await runCheck(text.trim(), {
-          url: mode === 'url' ? url.trim() : undefined,
-          image: mode === 'image' ? file ?? undefined : undefined,
-          video: mode === 'video' ? file ?? undefined : undefined,
+        await runCheck(trimmed, {
+          url: link.trim() || undefined,
+          image: image ?? undefined,
+          video: clip ?? undefined,
         }),
       );
     } catch {
@@ -184,7 +191,7 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [text, mode, url, file, onMe]);
+  }, [text, link, mode, file, onMe]);
 
   const chars = text.length;
   const nearLimit = chars > maxTextLength * 0.9;
@@ -206,26 +213,50 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
         <h2 className="visually-hidden" id="check-form-title">
           Проверить сообщение
         </h2>
+        {/* Ссылка из мессенджера — отдельное поле: главред спрашивал
+            именно про этот сценарий дважды. Текст можно не вставлять. */}
         <div className="field">
-          <div className="input-tabs" role="tablist" aria-label="Что проверяем">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={mode === tab.id}
-                className={`input-tab${mode === tab.id ? ' is-active' : ''}`}
-                onClick={() => {
-                  setMode(tab.id);
-                  setError(null);
-                  setResult(null);
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <label className="field__label" htmlFor="check-link">
+            <span>Ссылка на новость</span>
+            <span className="field__hint">необязательно</span>
+          </label>
+          <input
+            id="check-link"
+            className="input"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            value={link}
+            placeholder="https://t.me/… или адрес сайта"
+            onChange={(e) => {
+              setLink(e.target.value);
+              setError(null);
+            }}
+          />
+        </div>
 
+        <div className="input-tabs" role="tablist" aria-label="Что приложить">
+          {FILE_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={mode === tab.id}
+              className={`input-tab${mode === tab.id ? ' is-active' : ''}`}
+              onClick={() => {
+                setMode(tab.id);
+                setFile(null);
+                setError(null);
+                setResult(null);
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="field">
           {mode === 'text' && (
             <>
               <label className="field__label" htmlFor="check-text">
@@ -245,31 +276,6 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
                   setError(null);
                 }}
               />
-            </>
-          )}
-
-          {mode === 'url' && (
-            <>
-              <label className="field__label" htmlFor="check-url">
-                <span>Ссылка на публикацию</span>
-                <span className="field__hint">статья, пост, новость</span>
-              </label>
-              <input
-                id="check-url"
-                className="textarea textarea--line"
-                type="url"
-                inputMode="url"
-                value={url}
-                placeholder="https://…"
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setError(null);
-                }}
-              />
-              <p className="field__note">
-                Страница скачивается и проверяется как источник. Если нужен
-                конкретный тезис — добавьте текст во вкладке «Текст».
-              </p>
             </>
           )}
 
@@ -295,8 +301,7 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
                 </span>
               </div>
               <p className="field__note">
-                Проверяем метаданные файла, следы генерации и монтажа, контекст
-                публикации. Текст со скриншота распознаётся, если на сервере есть OCR.
+                Проверяем метаданные файла, следы генерации и монтажа, контекст публикации.
               </p>
             </>
           )}
@@ -360,7 +365,7 @@ export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
           </div>
         </div>
 
-        {/* Примеры — это готовые тексты: в режимах ссылки и скриншота они не нужны. */}
+        {/* Примеры — это готовые тексты: в режимах файла они не нужны. */}
         {mode === 'text' && (
           <div className="chips" role="group" aria-label="Примеры сообщений">
             <span className="chips__label">Примеры</span>

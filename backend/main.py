@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sys
@@ -91,11 +92,11 @@ async def not_found(request: Request, exc: Any) -> JSONResponse:
 # ---------- модели ----------
 
 class CheckRequest(BaseModel):
-    # Текст необязателен: проверять можно и одну ссылку, и один скриншот.
+    # Текст необязателен: можно прислать только ссылку из мессенджера
+    # или только скриншот — оба сценария штатные.
     text: str = Field(default="", max_length=MAX_TEXT)
-    #: Ссылка на проверяемую страницу. Нужна и чтобы скачать страницу для
-    #: проверки, и чтобы распознать сатирический или недостоверный сайт
-    #: до всякой модели.
+    #: Ссылка на проверяемую страницу. Нужна и для распознавания
+    #: сатирического сайта до всякой модели, и как замена тексту.
     url: Optional[str] = None
 
 
@@ -277,8 +278,9 @@ async def check_text(
 ) -> Any:
     """Проверить утверждение. Free — вердикт, pro — полный разбор.
 
-    Принимает JSON (текст и/или ссылка) и multipart с картинкой: скриншот
-    из мессенджера — самый частый материал, который присылают на проверку.
+    Принимает JSON (текст и/или ссылка) и multipart с картинкой или видео:
+    скриншот из мессенджера — самый частый материал, который присылают
+    на проверку.
     """
     image: Optional[bytes] = None
     image_name = ""
@@ -326,8 +328,22 @@ async def check_text(
     url = (url or "").strip() or None
     if url and not url.startswith(("http://", "https://")):
         return fail("BAD_INPUT", "ссылка должна начинаться с http:// или https://", 422)
-    if not image and not video and not url and len(text) < 8:
-        return fail("BAD_INPUT", "слишком короткий текст: нужно хотя бы 8 символов", 422)
+
+    if not image and not video:
+        # Ссылка вместо текста — штатный сценарий: пользователь жмёт
+        # «поделиться» в мессенджере и присылает адрес.
+        if url and not text:
+            # Импорт внутри функции: тесты подменяют lakmus.sources.fetch_page,
+            # и при импорте на уровне модуля подмена не срабатывала.
+            from lakmus.sources import fetch_page as _fetch
+
+            # В потоке: синхронное скачивание иначе держит event loop до 12 с.
+            page = await asyncio.to_thread(_fetch, url) or ""
+            text = page.strip()[:MAX_TEXT]
+        if len(text) < 8:
+            return fail(
+                "BAD_INPUT", "слишком короткий текст: нужно хотя бы 8 символов", 422
+            )
     if len(text) > MAX_TEXT:
         return fail("BAD_INPUT", f"текст длиннее {MAX_TEXT} символов", 422)
 
@@ -659,6 +675,23 @@ async def me(x_token: Optional[str] = Header(default=None, alias="X-Token")) -> 
         out["quota_left"] = store.free_quota_left(user["id"])
         out["quota_per_day"] = store.FREE_CHECKS_PER_DAY
     return out
+
+
+@app.get("/api/history")
+async def history(
+    limit: int = 50,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """История проверок пользователя. Главред назвал её базовой вещью."""
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    limit = max(1, min(100, limit))
+    items = store.user_checks(user["id"], limit=limit)
+    for item in items:
+        item["level_label"] = level_label(item.get("level") or "fog")
+        item["passport"] = f"/p/{item['text_hash']}"
+    return {"items": items}
 
 
 @app.post("/api/upgrade")

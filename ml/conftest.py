@@ -51,3 +51,14 @@ def pytest_pyfunc_call(pyfuncitem):
                   for name in pyfuncitem._fixtureinfo.argnames}
         asyncio.run(fn(**kwargs))
         return True
+
+
+def pytest_runtest_setup(item):
+    """Кэш пайплайна общий на процесс: без сброса тест получал результат
+    предыдущего теста на тот же текст и проверял не то, что хотел."""
+    try:
+        from lakmus.full_pipeline import _CACHE
+
+        _CACHE.clear()
+    except Exception:
+        pass

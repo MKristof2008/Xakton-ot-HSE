@@ -4,6 +4,7 @@ import type {
   ApiKeyUsage,
   CheckResponse,
   FeedResponse,
+  HistoryItem,
   Payment,
   Me,
   PricingResponse,
@@ -129,7 +130,11 @@ export async function getMe(): Promise<Me> {
   return request<Me>('/me');
 }
 
-/** Проверка текста, ссылки, скриншота или видео. Все входы — один контракт. */
+/**
+ * Проверка сообщения. Можно передать текст, ссылку, скриншот или видео —
+ * все входы идут одним контрактом. Ссылка нужна для сценария «поделиться
+ * из мессенджера», файл — для скриншота или ролика.
+ */
 export async function runCheck(
   text: string,
   extra: { url?: string; image?: File; video?: File } = {},
@@ -144,7 +149,7 @@ export async function runCheck(
   }
   return request<CheckResponse>('/check', {
     method: 'POST',
-    body: JSON.stringify({ text, url: extra.url || undefined }),
+    body: JSON.stringify({ text, url: extra.url || null }),
   });
 }
 
@@ -175,6 +180,11 @@ export async function revokeApiKey(id: string): Promise<{ ok: boolean }> {
 
 export async function getTop(hours = 48): Promise<TopResponse> {
   return request<TopResponse>(`/top?hours=${hours}`);
+}
+
+/** История проверок текущего пользователя. */
+export async function getHistory(limit = 50): Promise<{ items: HistoryItem[] }> {
+  return request<{ items: HistoryItem[] }>(`/history?limit=${limit}`);
 }
 
 export async function getStats(): Promise<Stats> {

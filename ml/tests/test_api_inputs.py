@@ -54,8 +54,17 @@ def test_short_text_rejected(auth_headers):
     assert r.json()["error"]["code"] == "BAD_INPUT"
 
 
-def test_url_check_accepted(auth_headers):
-    """Ссылка без текста — валидный вход, даже если страница не скачалась."""
+def test_url_check_accepted(auth_headers, monkeypatch):
+    """Ссылка без текста — валидный вход: текст берётся со страницы."""
+    import lakmus.sources as sources_mod
+
+    monkeypatch.setattr(
+        sources_mod,
+        "fetch_page",
+        lambda url, timeout=12: (
+            "МРОТ с 1 января 2025 года составляет 22 440 рубля в месяц."
+        ),
+    )
     r = client.post(
         "/api/check",
         json={"url": "https://example.invalid/news/1"},
@@ -65,6 +74,20 @@ def test_url_check_accepted(auth_headers):
     body = r.json()
     assert body["verdict"] in ("правда", "фейк", "непонятно")
     assert body["passport"].startswith("/p/")
+
+
+def test_url_unreachable_asks_for_text(auth_headers, monkeypatch):
+    """Страница не скачалась — честно просим текст, а не выдумываем вердикт."""
+    import lakmus.sources as sources_mod
+
+    monkeypatch.setattr(sources_mod, "fetch_page", lambda url, timeout=12: "")
+    r = client.post(
+        "/api/check",
+        json={"url": "https://example.invalid/news/1"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "BAD_INPUT"
 
 
 def test_url_without_scheme_rejected(auth_headers):

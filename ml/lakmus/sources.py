@@ -105,8 +105,18 @@ def _strip_html(raw: str) -> str:
 
 
 def domain_of(url: str) -> str:
-    match = re.match(r"https?://([^/:]+)", url or "")
-    return match.group(1).lower().lstrip("www.") if match else ""
+    """Хост без префикса www.
+
+    Раньше стоял lstrip("www.") — это набор символов, а не префикс:
+    «w3.org» превращался в «3.org», а «wow.ru» в «ow.ru». Порог доверия
+    от этого не ломался, но сравнение доменов врало.
+    """
+    # Скобки IPv6 берём в группу отдельно: [::1] иначе не разберётся.
+    match = re.match(r"https?://(\[[^\]]+\]|[^/:?#]+)", url or "")
+    if not match:
+        return ""
+    host = match.group(1).lower()
+    return host[4:] if host.startswith("www.") else host
 
 
 def is_trusted(url: str) -> bool:
@@ -120,17 +130,104 @@ def _is_private_host(url: str) -> bool:
     Пользователь может прислать ссылку, и без этой проверки бэкенд пойдёт
     по ней сам — в том числе на localhost, в облачные метаданные или в
     админ-панель роутера.
+
+    Проверяем не только dotted-запись: 127.0.0.1 записывают ещё как
+    0x7f000001, 2130706433 и [::1]. Раньше такие адреса проходили насквозь.
     """
     host = domain_of(url)
     if not host:
         return True
-    if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+    # IPv6 в скобках: [::1]:8000
+    bare = host.strip("[]")
+    if bare in ("localhost", "::1", "0.0.0.0", "::", "metadata.google.internal"):
         return True
-    if host.startswith(("10.", "192.168.", "169.254.", "127.")):
+    if bare.startswith("localhost.") or bare.endswith(".localhost"):
         return True
-    if re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host):
+
+    ip = _parse_ipv4(bare)
+    if ip is None:
+        return False  # обычный домен — решает DNS, см. _resolve_is_private
+    a, b, c, _ = ip
+    if a == 10 or a == 127 or a == 0:
+        return True
+    if a == 192 and b == 168:
+        return True
+    if a == 172 and 16 <= b <= 31:
+        return True
+    if a == 169 and b == 254:  # link-local, облачные метаданные
+        return True
+    if a == 100 and 64 <= b <= 127:  # CGNAT
         return True
     return False
+
+
+def _parse_ipv4(host: str) -> Optional[tuple[int, int, int, int]]:
+    """Разобрать IPv4 в любой записи: 127.0.0.1, 0x7f000001, 2130706433.
+
+    None — если это не IPv4-адрес (тогда это домен).
+    """
+    try:
+        if re.fullmatch(r"\d{1,10}", host):
+            n = int(host)
+            if n > 0xFFFFFFFF:
+                return None
+            return (n >> 24, (n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF)
+        if re.fullmatch(r"0[xX][0-9a-fA-F]{1,8}", host):
+            n = int(host, 16)
+            return (n >> 24, (n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF)
+        parts = host.split(".")
+        if len(parts) != 4:
+            return None
+        nums: list[int] = []
+        for part in parts:
+            if re.fullmatch(r"0[xX][0-9a-fA-F]{1,2}", part):
+                nums.append(int(part, 16))
+            elif re.fullmatch(r"0[0-7]{1,3}", part):
+                nums.append(int(part, 8))
+            elif re.fullmatch(r"\d{1,3}", part):
+                nums.append(int(part))
+            else:
+                return None
+        if any(n > 255 for n in nums):
+            return None
+        return (nums[0], nums[1], nums[2], nums[3])
+    except ValueError:
+        return None
+
+
+#: Домены мессенджеров: страница там не отдаёт текст без JS, но OpenGraph
+#: содержит заголовок и описание — этого хватает, чтобы понять, о чём новость.
+_MESSENGER_HOSTS = ("t.me", "telegram.me", "max.ru", "vk.me", "wa.me", "whatsapp.com")
+
+
+def _og_preview(page: str) -> Optional[str]:
+    """Заголовок и описание из OpenGraph — для страниц без читаемого текста."""
+    def pick(prop: str) -> str:
+        m = re.search(
+            rf'<meta[^>]+(?:property|name)=["\']{prop}["\'][^>]+content=["\']([^"\']+)',
+            page, re.I,
+        )
+        return html.unescape(m.group(1)).strip() if m else ""
+
+    parts = [pick("og:title"), pick("og:description")]
+    text = " — ".join(p for p in parts if p)
+    return text if len(text) > 20 else None
+
+
+class _GuardedRedirects(urllib.request.HTTPRedirectHandler):
+    """Редирект проверяем так же, как исходную ссылку.
+
+    Иначе SSRF обходится в один шаг: публичный URL отвечает 302 на
+    127.0.0.1, и urllib идёт туда сам, уже без проверки.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        if _is_private_host(newurl):
+            return None  # отказ от редиректа — urllib вернёт исходный ответ
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_GuardedRedirects)
 
 
 def fetch_page(url: str, timeout: int = FETCH_TIMEOUT) -> Optional[str]:
@@ -146,7 +243,7 @@ def fetch_page(url: str, timeout: int = FETCH_TIMEOUT) -> Optional[str]:
         headers={"User-Agent": USER_AGENT, "Accept-Language": "ru,en;q=0.8"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
             raw = response.read(MAX_PAGE_BYTES)
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
@@ -156,7 +253,17 @@ def fetch_page(url: str, timeout: int = FETCH_TIMEOUT) -> Optional[str]:
     except LookupError:
         page = raw.decode("utf-8", errors="replace")
     text = _strip_html(page)
-    return text[:MAX_CONTENT_CHARS] if len(text) > 50 else None
+    if len(text) > 50:
+        return text[:MAX_CONTENT_CHARS]
+
+    # Мессенджеры и соцсети отдают пустой каркас: весь смысл в OpenGraph.
+    # Без этого ссылка из Телеграма выглядела как «источник недоступен».
+    if any(h in domain_of(url) for h in _MESSENGER_HOSTS):
+        preview = _og_preview(page)
+        if preview:
+            return preview[:MAX_CONTENT_CHARS]
+    preview = _og_preview(page)
+    return preview[:MAX_CONTENT_CHARS] if preview else None
 
 
 # -------------------------------------------------------------- провайдеры
@@ -225,14 +332,21 @@ class CatalogProvider:
         self._catalog.append({"url": url, "title": title})
 
     async def find(self, query: str, limit: int = 3) -> Sequence[FetchedSource]:
+        # Страницы качаются параллельно и в потоке: fetch_page синхронный,
+        # а внутри asyncio он блокировал бы весь event loop — остальные
+        # провайдеры и оценка ждали бы его скачивания.
+        items = [i for i in self._catalog[:limit] if i.get("url")]
+        if not items:
+            return []
+        pages = await asyncio.gather(
+            *(asyncio.to_thread(fetch_page, i["url"]) for i in items),
+            return_exceptions=True,
+        )
         out: list[FetchedSource] = []
-        for item in self._catalog[:limit]:
-            url = item.get("url", "")
-            if not url:
+        for item, content in zip(items, pages):
+            if not isinstance(content, str) or not content:
                 continue
-            content = fetch_page(url)
-            if not content:
-                continue
+            url = item["url"]
             out.append(
                 FetchedSource(
                     id=f"web_{domain_of(url)}_{len(out)}",
@@ -256,7 +370,8 @@ class UrlProvider:
     async def find(self, query: str, limit: int = 1) -> Sequence[FetchedSource]:
         if not query.startswith(("http://", "https://")):
             return []
-        content = fetch_page(query)
+        # В потоке: синхронный fetch_page иначе держит event loop до 12 с.
+        content = await asyncio.to_thread(fetch_page, query)
         if not content:
             return []
         return [

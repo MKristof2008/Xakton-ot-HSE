@@ -23,6 +23,8 @@ interface Props {
 
 export function VerdictCard({ result, onUpgraded }: Props) {
   const tone = toneForLevel(result.level);
+  // Хук вызывается всегда — правила хуков не позволяют звать его под
+  // условием, а на free-тарифе число скрыто.
   const score = useCountUp(result.score, 1000);
   const uncertainty = uncertaintyPercent(result.uncertainty);
 
@@ -39,22 +41,29 @@ export function VerdictCard({ result, onUpgraded }: Props) {
           <p className="verdict__sub">{verdictSubline(result.verdict)}</p>
         </div>
 
-        <div className="score">
-          <span className="score__label">Уровень доверия</span>
-          <span className="score__num">
-            {score}
-            <span className="score__of"> / 100</span>
-          </span>
-          <div className="meter" role="img" aria-label={`Уровень доверия ${result.score} из 100`}>
-            <span className="meter__fill" style={{ width: `${result.score}%` }} />
+        {/* Индекс доверия — только в подписке. По словам главреда, на
+            бесплатном экране «5 из 10» читается как «это обман» и путает:
+            человеку нужен ответ словами, а не число. */}
+        {result.plan !== 'free' && (
+          <div className="score">
+            <span className="score__label">Уровень доверия</span>
+            <span className="score__num">
+              {score}
+              <span className="score__of"> / 100</span>
+            </span>
+            <div className="meter" role="img" aria-label={`Уровень доверия ${result.score} из 100`}>
+              <span className="meter__fill" style={{ width: `${result.score}%` }} />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="verdict__meta">
-        <span>
-          Неуверенность <strong>{uncertainty}%</strong>
-        </span>
+        {result.plan !== 'free' && (
+          <span>
+            Неуверенность <strong>{uncertainty}%</strong>
+          </span>
+        )}
         {typeof result.quota_left === 'number' && (
           <span>
             Осталось сегодня{' '}
@@ -63,7 +72,9 @@ export function VerdictCard({ result, onUpgraded }: Props) {
             </strong>
           </span>
         )}
-        {typeof result.duration_ms === 'number' && (
+        {/* Время проверки — тоже деталь разбора: бесплатному пользователю
+            миллисекунды ничего не говорят, а места занимают. */}
+        {result.plan !== 'free' && typeof result.duration_ms === 'number' && (
           <span>
             Проверка заняла <strong>{Math.round(result.duration_ms)} мс</strong>
           </span>

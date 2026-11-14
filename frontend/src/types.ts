@@ -93,6 +93,19 @@ export interface TopItem {
   last_minute?: number;
 }
 
+export interface HistoryItem {
+  id: string;
+  text: string;
+  verdict: Verdict;
+  level: Level;
+  level_label: string;
+  score: number;
+  uncertainty: number;
+  text_hash: string;
+  created_at: string;
+  passport: string;
+}
+
 export interface TopResponse {
   window_hours: number;
   items: TopItem[];

@@ -574,15 +574,31 @@ dt {
   transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1);
 }
 
-.textarea::placeholder {
+/* Поле ссылки: та же рамка, что у textarea, но в одну строку. */
+.input {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 13px 17px;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1);
+}
+
+.textarea::placeholder,
+.input::placeholder {
   color: var(--faint);
 }
 
-.textarea:hover {
+.textarea:hover,
+.input:hover {
   border-color: var(--line-strong);
 }
 
-.textarea:focus {
+.textarea:focus,
+.input:focus {
   outline: none;
   border-color: var(--ink);
   background: var(--surface);
@@ -1367,6 +1383,59 @@ dt {
   color: var(--muted);
 }
 
+/* Этапы проверки в скелетоне: видно, что система не висит, а работает. */
+.skeleton__steps {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.skeleton__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--faint);
+  transition: color var(--dur-1) var(--ease-out);
+}
+
+.skeleton__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+.skeleton__step.is-active {
+  color: var(--ink);
+}
+
+.skeleton__step.is-active .skeleton__dot {
+  background: var(--ink);
+  animation: skel-pulse 1s ease-in-out infinite;
+}
+
+.skeleton__step.is-done {
+  color: var(--muted);
+}
+
+.skeleton__step.is-done .skeleton__dot {
+  background: var(--muted);
+}
+
+@keyframes skel-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton__step.is-active .skeleton__dot { animation: none; }
+}
+
 .dots {
   display: inline-flex;
   gap: 3px;
@@ -1477,6 +1546,32 @@ dt {
   font-size: 16px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+/* История: вся строка — ссылка на паспорт, колонки под ранг тут нет. */
+.top-item--link {
+  grid-template-columns: 1fr;
+  padding-left: 10px;
+}
+
+.top-item__anchor {
+  display: grid;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-1) var(--ease-out);
+}
+
+.top-item__anchor:hover .top-item__text {
+  color: var(--accent, var(--ink));
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.top-item__anchor:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
 }
 
 .top-item__meta {
