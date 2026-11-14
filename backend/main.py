@@ -85,7 +85,10 @@ async def not_found(request: Request, exc: Any) -> JSONResponse:
 # ---------- модели ----------
 
 class CheckRequest(BaseModel):
-    text: str = Field(..., max_length=MAX_TEXT)
+    # Текст необязателен: пользователь может прислать только ссылку из
+    # мессенджера — это самый частый сценарий, по словам главреда.
+    text: str = Field(default="", max_length=MAX_TEXT)
+    url: Optional[str] = None
 
 
 class UpgradeRequest(BaseModel):
@@ -233,6 +236,17 @@ async def check_text(
 ) -> Any:
     """Проверить утверждение. Free — вердикт, pro — полный разбор."""
     text = (req.text or "").strip()
+    url = (req.url or "").strip() or None
+
+    # Ссылка вместо текста — штатный сценарий: пользователь жмёт «поделиться»
+    # в мессенджере и присылает адрес. Тогда текст берём со страницы.
+    if url and not text:
+        if not url.startswith(("http://", "https://")):
+            return fail("BAD_INPUT", "ссылка должна начинаться с http:// или https://", 422)
+        from lakmus.sources import fetch_page
+        page = fetch_page(url) or ""
+        text = page.strip()[:MAX_TEXT]
+
     if len(text) < 8:
         return fail("BAD_INPUT", "слишком короткий текст: нужно хотя бы 8 символов", 422)
     if len(text) > MAX_TEXT:
@@ -261,7 +275,7 @@ async def check_text(
     try:
         # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
         # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
-        outcome = await run_full_check(text)
+        outcome = await run_full_check(text, url=url)
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
 
@@ -392,6 +406,23 @@ async def me(x_token: Optional[str] = Header(default=None, alias="X-Token")) -> 
         out["quota_left"] = store.free_quota_left(user["id"])
         out["quota_per_day"] = store.FREE_CHECKS_PER_DAY
     return out
+
+
+@app.get("/api/history")
+async def history(
+    limit: int = 50,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """История проверок пользователя. Главред назвал её базовой вещью."""
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    limit = max(1, min(100, limit))
+    items = store.user_checks(user["id"], limit=limit)
+    for item in items:
+        item["level_label"] = level_label(item.get("level") or "fog")
+        item["passport"] = f"/p/{item['text_hash']}"
+    return {"items": items}
 
 
 @app.post("/api/upgrade")

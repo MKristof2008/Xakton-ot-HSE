@@ -1,6 +1,7 @@
 import { apiBaseUrl } from '../config';
 import type {
   CheckResponse,
+  HistoryItem,
   Payment,
   Me,
   PricingResponse,
@@ -126,15 +127,28 @@ export async function getMe(): Promise<Me> {
   return request<Me>('/me');
 }
 
-export async function runCheck(text: string): Promise<CheckResponse> {
+/**
+ * Проверка сообщения. Можно передать текст, ссылку или и то и другое:
+ * ссылка из мессенджера — самый частый сценарий по словам главреда,
+ * человек жмёт «поделиться» и присылает адрес.
+ */
+export async function runCheck(
+  text: string,
+  url?: string | null,
+): Promise<CheckResponse> {
   return request<CheckResponse>('/check', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, url: url || null }),
   });
 }
 
 export async function getTop(hours = 48): Promise<TopResponse> {
   return request<TopResponse>(`/top?hours=${hours}`);
+}
+
+/** История проверок текущего пользователя. */
+export async function getHistory(limit = 50): Promise<{ items: HistoryItem[] }> {
+  return request<{ items: HistoryItem[] }>(`/history?limit=${limit}`);
 }
 
 export async function getStats(): Promise<Stats> {

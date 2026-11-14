@@ -573,11 +573,25 @@ async def run_check(
     if serper.enabled and _judge_with_kb(text) is None:
         providers.append(serper)
 
+    # Провайдеры опрашиваются ПАРАЛЛЕЛЬНО. Раньше они шли по очереди, и
+    # время складывалось: база 1 мс + интернет 3-10 с + ссылка пользователя
+    # до 12 с. Пользователь видел «долго думает» даже когда база ответила
+    # сразу. Теперь самый медленный провайдер задаёт общее время, а не сумма.
+    async def _ask(provider: SourceProvider) -> list[FetchedSource]:
+        query = url if provider.name == "url" and url else claims[0]
+        try:
+            return list(await provider.find(query, limit=3))
+        except Exception:
+            # Сбой одного провайдера не должен ронять проверку.
+            return []
+
+    per_provider = await asyncio.gather(*(_ask(p) for p in providers))
+
     sources: list[FetchedSource] = []
     seen_ids: set[str] = set()
-    for provider in providers:
-        query = url if provider.name == "url" and url else claims[0]
-        found = await provider.find(query, limit=3)
+    # Порядок провайдеров сохраняем: база и присланная ссылка весят больше
+    # интернет-выдачи, поэтому идут первыми в списке источников.
+    for found in per_provider:
         for item in found:
             if item.id not in seen_ids:
                 seen_ids.add(item.id)

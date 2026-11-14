@@ -20,6 +20,17 @@ def _clear_cache():
     _CACHE.clear()
 
 
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """Без ключа модели: тесты не должны ходить в живую LLM.
+
+    backend.main подхватывает ml/.env, и если там лежит LLM_API_KEY,
+    пайплайн отвечает через модель — недетерминированно и по сети.
+    """
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+
+
 # --- 1. Защиты от vague/future не работали -------------------------------
 
 def test_future_claim_is_not_refuted():

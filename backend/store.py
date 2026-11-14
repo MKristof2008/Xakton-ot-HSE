@@ -50,8 +50,9 @@ CREATE TABLE IF NOT EXISTS users (
     pass_hash   TEXT,
     name        TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)
-    WHERE email IS NOT NULL;
+-- Индекс по email создаётся отдельно, ПОСЛЕ миграции: на старой базе
+-- колонки email нет, и CREATE INDEX падал с «no such column».
+
 
 CREATE TABLE IF NOT EXISTS payments (
     id            TEXT PRIMARY KEY,
@@ -79,6 +80,46 @@ def db_path() -> Path:
     return Path(os.environ.get("VERDICT_DB") or DEFAULT_DB)
 
 
+#: Колонки, добавленные после первого релиза. `CREATE TABLE IF NOT EXISTS`
+#: не меняет уже существующую таблицу, поэтому на старой базе приложение
+#: падало с «no such column: email». Досоздаём недостающие колонки здесь.
+_MIGRATIONS: dict[str, dict[str, str]] = {
+    "users": {
+        "expires_at": "TEXT",
+        "email": "TEXT",
+        "pass_hash": "TEXT",
+        "name": "TEXT",
+    },
+    "checks": {
+        "user_id": "TEXT",
+    },
+    "payments": {
+        "confirmed_at": "TEXT",
+    },
+}
+
+
+#: Индексы, которые зависят от колонок из миграций.
+_POST_MIGRATION_SQL = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)
+    WHERE email IS NOT NULL;
+"""
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Довести схему существующей базы до текущей, не теряя данные."""
+    for table, columns in _MIGRATIONS.items():
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if not rows:
+            continue  # таблицы ещё нет — её создаст SCHEMA
+        have = {row[1] for row in rows}
+        for name, kind in columns.items():
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+    # Индексы по новым колонкам — только теперь, когда они точно есть.
+    conn.executescript(_POST_MIGRATION_SQL)
+
+
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     path = db_path()
@@ -87,6 +128,7 @@ def connect() -> Iterator[sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         yield conn
         conn.commit()
     finally:
@@ -379,6 +421,21 @@ def get_check(check_id: str) -> Optional[dict[str, Any]]:
     data = dict(row)
     data["full"] = json.loads(data.pop("full_json"))
     return data
+
+
+def user_checks(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """История проверок пользователя — свежие сверху.
+
+    Главред назвал историю «базовой» вещью: человек проверял новость
+    вчера и хочет вернуться к вердикту, а не искать сообщение заново.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, text, verdict, score, uncertainty, level, text_hash, created_at"
+            " FROM checks WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, int(limit)),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_by_hash(text_hash_value: str) -> Optional[dict[str, Any]]:

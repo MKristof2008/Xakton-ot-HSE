@@ -7,6 +7,7 @@ import { Header } from './components/Header';
 import { AuthScreen } from './components/AuthScreen';
 import { Footer } from './components/Footer';
 import { CheckScreen } from './components/CheckScreen';
+import { HistoryScreen } from './components/HistoryScreen';
 import { TopScreen } from './components/TopScreen';
 import { PlansScreen } from './components/PlansScreen';
 import './styles/global.css';
@@ -71,6 +72,7 @@ export default function App() {
 
       <main className="main" id="content">
         {tab === 'check' && <CheckScreen me={me} onMe={setMe} />}
+        {tab === 'history' && <HistoryScreen />}
         {tab === 'top' && <TopScreen />}
         {tab === 'plans' && <PlansScreen me={me} onMe={setMe} />}
       </main>

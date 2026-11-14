@@ -130,6 +130,25 @@ def _is_private_host(url: str) -> bool:
     return False
 
 
+#: Домены мессенджеров: страница там не отдаёт текст без JS, но OpenGraph
+#: содержит заголовок и описание — этого хватает, чтобы понять, о чём новость.
+_MESSENGER_HOSTS = ("t.me", "telegram.me", "max.ru", "vk.me", "wa.me", "whatsapp.com")
+
+
+def _og_preview(page: str) -> Optional[str]:
+    """Заголовок и описание из OpenGraph — для страниц без читаемого текста."""
+    def pick(prop: str) -> str:
+        m = re.search(
+            rf'<meta[^>]+(?:property|name)=["\']{prop}["\'][^>]+content=["\']([^"\']+)',
+            page, re.I,
+        )
+        return html.unescape(m.group(1)).strip() if m else ""
+
+    parts = [pick("og:title"), pick("og:description")]
+    text = " — ".join(p for p in parts if p)
+    return text if len(text) > 20 else None
+
+
 def fetch_page(url: str, timeout: int = FETCH_TIMEOUT) -> Optional[str]:
     """Скачать страницу и вернуть текст. None — если не получилось.
 
@@ -153,7 +172,17 @@ def fetch_page(url: str, timeout: int = FETCH_TIMEOUT) -> Optional[str]:
     except LookupError:
         page = raw.decode("utf-8", errors="replace")
     text = _strip_html(page)
-    return text[:MAX_CONTENT_CHARS] if len(text) > 50 else None
+    if len(text) > 50:
+        return text[:MAX_CONTENT_CHARS]
+
+    # Мессенджеры и соцсети отдают пустой каркас: весь смысл в OpenGraph.
+    # Без этого ссылка из Телеграма выглядела как «источник недоступен».
+    if any(h in domain_of(url) for h in _MESSENGER_HOSTS):
+        preview = _og_preview(page)
+        if preview:
+            return preview[:MAX_CONTENT_CHARS]
+    preview = _og_preview(page)
+    return preview[:MAX_CONTENT_CHARS] if preview else None
 
 
 # -------------------------------------------------------------- провайдеры
@@ -222,14 +251,21 @@ class CatalogProvider:
         self._catalog.append({"url": url, "title": title})
 
     async def find(self, query: str, limit: int = 3) -> Sequence[FetchedSource]:
+        # Страницы качаются параллельно и в потоке: fetch_page синхронный,
+        # а внутри asyncio он блокировал бы весь event loop — остальные
+        # провайдеры и оценка ждали бы его скачивания.
+        items = [i for i in self._catalog[:limit] if i.get("url")]
+        if not items:
+            return []
+        pages = await asyncio.gather(
+            *(asyncio.to_thread(fetch_page, i["url"]) for i in items),
+            return_exceptions=True,
+        )
         out: list[FetchedSource] = []
-        for item in self._catalog[:limit]:
-            url = item.get("url", "")
-            if not url:
+        for item, content in zip(items, pages):
+            if not isinstance(content, str) or not content:
                 continue
-            content = fetch_page(url)
-            if not content:
-                continue
+            url = item["url"]
             out.append(
                 FetchedSource(
                     id=f"web_{domain_of(url)}_{len(out)}",
@@ -253,7 +289,8 @@ class UrlProvider:
     async def find(self, query: str, limit: int = 1) -> Sequence[FetchedSource]:
         if not query.startswith(("http://", "https://")):
             return []
-        content = fetch_page(query)
+        # В потоке: синхронный fetch_page иначе держит event loop до 12 с.
+        content = await asyncio.to_thread(fetch_page, query)
         if not content:
             return []
         return [

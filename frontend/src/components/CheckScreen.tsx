@@ -15,6 +15,9 @@ interface Props {
 /** Минимальная выдержка скелетона: вердикт должен ощущаться как решение системы. */
 const MIN_SKELETON_MS = 620;
 
+/** Ссылка из мессенджера: «поделиться» вставляет адрес в буфер. */
+const LINK_RE = /^https?:\/\/\S+$/i;
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -40,6 +43,9 @@ export function CheckScreen({ me, onMe }: Props) {
   // ?q=... кладётся в sessionStorage до рендера — забираем его ровно один раз.
   const [preset] = useState(readPreset);
   const [text, setText] = useState(() => preset ?? '');
+  // Отдельное поле для ссылки: человек жмёт «поделиться» и вставляет адрес,
+  // не задумываясь, что это не текст сообщения.
+  const [link, setLink] = useState('');
   const [result, setResult] = useState<CheckResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,8 +55,14 @@ export function CheckScreen({ me, onMe }: Props) {
   const submit = useCallback(
     async (raw?: string) => {
       const value = (raw ?? text).trim();
-      if (value.length < 8) {
-        setError('Нужно хотя бы 8 символов — иначе проверять нечего.');
+      // Ссылку можно проверить и без текста — бэкенд вытащит его со страницы.
+      const onlyUrl = !value && LINK_RE.test(link.trim());
+      if (!onlyUrl && value.length < 8) {
+        setError(
+          link.trim()
+            ? 'Ссылка должна начинаться с http:// или https://'
+            : 'Нужно хотя бы 8 символов или ссылка — иначе проверять нечего.',
+        );
         return;
       }
 
@@ -60,7 +72,7 @@ export function CheckScreen({ me, onMe }: Props) {
 
       try {
         const [data] = await Promise.all([
-          runCheck(value),
+          runCheck(value, onlyUrl ? link.trim() : null),
           reduced ? Promise.resolve() : delay(MIN_SKELETON_MS),
         ]);
         setResult(data);
@@ -78,7 +90,7 @@ export function CheckScreen({ me, onMe }: Props) {
         setBusy(false);
       }
     },
-    [text, me, onMe, reduced],
+    [text, link, me, onMe, reduced],
   );
 
   // ?q=... сразу запускает проверку — так удобно делиться вердиктом.
@@ -109,18 +121,19 @@ export function CheckScreen({ me, onMe }: Props) {
       /* тариф обновится при следующем запросе */
     }
     const trimmed = text.trim();
-    if (trimmed.length < 8) return;
+    const onlyUrl = !trimmed && LINK_RE.test(link.trim());
+    if (!onlyUrl && trimmed.length < 8) return;
 
     setBusy(true);
     setResult(null);
     try {
-      setResult(await runCheck(trimmed));
+      setResult(await runCheck(trimmed, onlyUrl ? link.trim() : null));
     } catch {
       setError('Подписка включена, но разбор не загрузился. Проверьте текст ещё раз.');
     } finally {
       setBusy(false);
     }
-  }, [text, onMe]);
+  }, [text, link, onMe]);
 
   const chars = text.length;
   const nearLimit = chars > maxTextLength * 0.9;
@@ -142,6 +155,29 @@ export function CheckScreen({ me, onMe }: Props) {
         <h2 className="visually-hidden" id="check-form-title">
           Проверить сообщение
         </h2>
+        {/* Ссылка из мессенджера — отдельное поле: главред спрашивал
+            именно про этот сценарий дважды. Текст можно не вставлять. */}
+        <div className="field">
+          <label className="field__label" htmlFor="check-link">
+            <span>Ссылка на новость</span>
+            <span className="field__hint">необязательно</span>
+          </label>
+          <input
+            id="check-link"
+            className="input"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            value={link}
+            placeholder="https://t.me/… или адрес сайта"
+            onChange={(e) => {
+              setLink(e.target.value);
+              setError(null);
+            }}
+          />
+        </div>
+
         <div className="field">
           <label className="field__label" htmlFor="check-text">
             <span>Текст сообщения</span>
