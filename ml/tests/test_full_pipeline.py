@@ -34,7 +34,21 @@ from lakmus.sources import (
 
 
 def run(text: str, **kwargs):
-    return asyncio.run(run_check(text, **kwargs))
+    """Проверка в офлайн-режиме: без ключей, только база фактов.
+
+    Тесты проверяют детерминированную логику. Если в окружении есть
+    LLM_API_KEY и SERPER_API_KEY, пайплайн ходил бы в интернет и вести
+    себя нестабильно — поэтому на время вызова ключи убираем.
+    """
+    import os as _os
+
+    saved = {k: _os.environ.pop(k, None) for k in ("LLM_API_KEY", "SERPER_API_KEY")}
+    try:
+        return asyncio.run(run_check(text, **kwargs))
+    finally:
+        for key, value in saved.items():
+            if value is not None:
+                _os.environ[key] = value
 
 
 # ------------------------------------------------------------ извлечение
@@ -167,11 +181,27 @@ def test_known_true_is_confirmed():
     assert result.verdict == "правда"
 
 
-def test_unknown_topic_is_not_fake():
-    """Главное: чего нет в источниках — «непонятно», а не «фейк»."""
+def test_unknown_topic_without_sources_is_not_fake():
+    """Без поиска проверять нечем — честный ответ «непонятно».
+
+    Строгий режим (поиск был, подтверждений нет → «фейк») проверяется
+    отдельно в test_strict_mode_*.
+    """
     result = run("Вчера в Казани открыли новый мост через реку.")
     assert result.verdict == "непонятно"
     assert result.claims[0].status == "insufficient"
+
+
+def test_prediction_is_never_fake():
+    """Прогноз не может быть ложью: событие ещё не наступило."""
+    result = run("Завтра в Москве ожидается снег.")
+    assert result.verdict == "непонятно"
+
+
+def test_vague_claim_is_not_checked():
+    """«Компания X купила Y» — проверять нечего, это не фейк."""
+    result = run("Компания X купила компанию Y за 2 млрд рублей.")
+    assert result.verdict == "непонятно"
 
 
 def test_empty_message_reports_no_claims():

@@ -1776,6 +1776,29 @@ dt {
     padding: 28px 18px 56px;
   }
 
+  /* Шапка должна помещаться в 400px: навигация прокручивается,
+     а не растягивает страницу. */
+  .header__inner {
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .nav {
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .account {
+    flex: 0 0 auto;
+  }
+
+
   .view {
     gap: 28px;
   }
@@ -2425,6 +2448,12 @@ dt {
 .feed-list {
   list-style: none;
   padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* ======================================================== вход и аккаунт */
 
 .auth {
@@ -2720,6 +2749,16 @@ dt {
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.explain__text {
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
 .auth__field {
   display: flex;
   flex-direction: column;
@@ -2733,10 +2772,6 @@ dt {
   color: var(--muted);
 }
 
-.explain__text {
-  font-size: 15.5px;
-  line-height: 1.6;
-  color: var(--ink);
 .auth__submit {
   margin-top: 6px;
   padding: 12px;
@@ -2814,18 +2849,30 @@ dt {
 /* меню аккаунта */
 .account {
   position: relative;
+  /* Не сжимаем блок аккаунта: иначе аватар вылезает за бейдж тарифа. */
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.account__btn {
+  /* Кнопка обрезала содержимое по своим размерам — разрешаем видимый выход. */
+  overflow: visible;
+  white-space: nowrap;
 }
 
 .account__btn {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
   background: none;
   border: 0;
   padding: 0;
 }
 
 .account__avatar {
+  /* flex: none — иначе круг сжимается и налезает на бейдж тарифа. */
+  flex: none;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -2835,6 +2882,7 @@ dt {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1;
 }
 
 .account__scrim {
