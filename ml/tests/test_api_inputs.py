@@ -21,6 +21,16 @@ os.environ.setdefault("VERDICT_DB", ":memory:")
 from backend.main import app  # noqa: E402
 
 client = TestClient(app)
+# Проверка доступна только с аккаунтом. Токен берём на каждый тест:
+# in-memory база общая для процесса, и токен, созданный при импорте,
+# к моменту теста может относиться к уже пересозданной базе.
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _fresh_auth(monkeypatch):
+    global AUTH
+    AUTH = {"X-Token": client.post("/api/users").json()["token"]}
 
 TEXT = "СРОЧНО! ЦБ запретил наличные с 1 марта 2026 года!"
 

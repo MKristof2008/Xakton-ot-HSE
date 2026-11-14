@@ -192,6 +192,26 @@ def _migrate(conn: sqlite3.Connection) -> None:
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     path = db_path()
+    # «:memory:» — не файл: каждое соединение создавало бы пустую базу,
+    # и пользователь исчезал между запросами. Держим одно общее соединение
+    # с общим кэшем, чтобы in-memory база жила весь процесс.
+    if str(path) == ":memory:":
+        global _MEMORY_CONN
+        try:
+            _MEMORY_CONN  # type: ignore[name-defined]
+        except NameError:
+            _MEMORY_CONN = sqlite3.connect(
+                "file:witness_mem?mode=memory&cache=shared",
+                uri=True, timeout=10, check_same_thread=False,
+            )
+            _MEMORY_CONN.row_factory = sqlite3.Row
+        _MEMORY_CONN.executescript(SCHEMA)
+        try:
+            yield _MEMORY_CONN
+            _MEMORY_CONN.commit()
+        finally:
+            pass
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row

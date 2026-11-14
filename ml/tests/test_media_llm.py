@@ -23,7 +23,6 @@ from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT.parent / "backend"))
 
 os.environ["VERDICT_DB"] = str(
     Path(tempfile.mkdtemp(prefix="revizor-media-")) / "test.db"
@@ -37,7 +36,11 @@ client = TestClient(app)
 
 
 def auth_headers() -> dict[str, str]:
-    """Проверка идёт только по аккаунту: тариф team снимает лимит free."""
+    """Аккаунт с тарифом team: проверки идут только по токену.
+
+    Тариф team снимает дневной лимит free, иначе часть тестов упиралась
+    бы в QUOTA_EXCEEDED вместо проверки логики.
+    """
     token = client.post("/api/users").json()["token"]
     client.post("/api/upgrade", json={"plan": "team"}, headers={"X-Token": token})
     return {"X-Token": token}
@@ -108,17 +111,16 @@ def test_photo_with_editor_metadata_is_explained():
 
 
 def test_photo_caption_reaches_payload():
-    headers = auth_headers()
     r = client.post(
         "/api/check",
         data={"text": "Снимок сделан вчера в Казани"},
         files={"image": ("p.png", png_bytes(), "image/png")},
-        headers=headers,
+        headers=auth_headers(),
     )
     assert r.status_code == 200, r.text
     # Подпись сохраняется в паспорте — по ней потом ищут проверку.
     passport = r.json()["passport"]
-    page = client.get(passport, headers=headers)
+    page = client.get(passport, headers=auth_headers())
     assert page.status_code == 200
 
 

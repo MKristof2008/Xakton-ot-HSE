@@ -95,8 +95,10 @@ class CheckRequest(BaseModel):
     # Текст необязателен: можно прислать только ссылку из мессенджера
     # или только скриншот — оба сценария штатные.
     text: str = Field(default="", max_length=MAX_TEXT)
-    #: Ссылка на проверяемую страницу. Нужна и для распознавания
-    #: сатирического сайта до всякой модели, и как замена тексту.
+    #: Ссылка на проверяемую страницу: нужна, чтобы распознать
+    #: сатирический или недостоверный сайт до всякой модели, и как
+    #: замена тексту.
+    url: Optional[str] = None
     url: Optional[str] = None
 
 
@@ -160,6 +162,29 @@ def verdict_of(result: Any) -> str:
     if level in ("likely_fake", "doubtful"):
         return "фейк"
     return "непонятно"
+
+
+def _detector_explanation(result: Any) -> str:
+    """Объяснение вердикта по медиа без модели: собираем из сигналов.
+
+    Модель переводит отчёт детекторов на человеческий язык, но её может не
+    быть. Тогда объяснение всё равно нужно: вердикт без обоснования — это
+    ровно то, за что ругают «нейросеть сказала».
+    """
+    parts: list[str] = []
+    for signal in result.signals or []:
+        verdict = getattr(getattr(signal, "verdict", None), "value", "")
+        if verdict in ("supports_fake", "supports_real"):
+            parts.append(str(signal.summary or "").strip())
+    if not parts:
+        parts = [
+            str(s.summary or "").strip()
+            for s in (result.signals or [])
+            if getattr(s, "summary", "")
+        ][:2]
+    if not parts:
+        return "Признаков для вывода не нашлось: данных слишком мало."
+    return " ".join(p for p in parts[:3] if p)[:600]
 
 
 def _clean_url(value: Optional[str]) -> Optional[str]:
@@ -503,9 +528,8 @@ async def check_text(
         return fail("BAD_INPUT", f"текст длиннее {MAX_TEXT} символов", 422)
 
     # Без аккаунта проверок нет: лимиты, тариф и история платежей живут
-    # в профиле. Гостевой доступ давал бы бесконечные бесплатные проверки
-    # после перезагрузки страницы. Кроме токена браузера принимаем
-    # корпоративный ключ X-Api-Key — он тоже привязан к аккаунту.
+    # в профиле. Вход — по токену браузера или по API-ключу корпорации;
+    # оба привязаны к аккаунту, поэтому лимиты и тариф работают одинаково.
     user = resolve_any_user(x_token, x_api_key)
     if user is None:
         return fail(
@@ -561,6 +585,10 @@ async def check_text(
                 if plan in ("pro", "team"):
                     payload["model_verdict"] = media_note["verdict"]
             else:
+                # Модели нет или она промолчала — объясняем детерминированно.
+                # Пустой explanation ломает и интерфейс, и паспорт: человек
+                # видит вердикт без единого слова обоснования.
+                payload["explanation"] = _detector_explanation(result)
                 payload["explanation_source"] = "detectors"
 
             store.save_check(
@@ -598,6 +626,9 @@ async def check_text(
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
 
     # Постоянная ссылка на паспорт: одна на утверждение, живёт после закрытия.
+    # Для медиа subject задаётся выше (имя файла или подпись), для текста —
+    # сам текст или ссылка. Берём уже вычисленное, а не пересчитываем.
+    subject = locals().get("subject") or text
     payload["passport"] = f"/p/{store.text_hash(subject)}"
     payload["quota_left"] = (
         store.free_quota_left(user["id"]) if plan == "free" else None

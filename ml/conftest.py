@@ -42,6 +42,54 @@ def _offline_by_default(monkeypatch):
         pass
 
 
+#: Готовые заголовки для тестов, которые не хотят зависеть от фикстуры.
+#: Раньше часть тестов писала headers=AUTH — такого имени в проекте не было
+#: и они падали на ImportError. Теперь оно есть и работает так же, как
+#: фикстура auth_headers: аккаунт с тарифом team, без дневного лимита.
+def _make_auth() -> dict:
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+
+    client = TestClient(app)
+    token = client.post("/api/users").json()["token"]
+    client.post("/api/upgrade", json={"plan": "team"}, headers={"X-Token": token})
+    return {"X-Token": token}
+
+
+class _AuthProxy:
+    """Ленивые заголовки: к базе обращаемся при первом использовании.
+
+    Важно не создавать аккаунт при импорте conftest: тогда он появится
+    до того, как тест выставит свою временную базу (VERDICT_DB).
+    """
+
+    _cache: dict | None = None
+
+    def _get(self) -> dict:
+        if _AuthProxy._cache is None:
+            _AuthProxy._cache = _make_auth()
+        return _AuthProxy._cache
+
+    def keys(self):
+        return self._get().keys()
+
+    def __getitem__(self, key):
+        return self._get()[key]
+
+    def __iter__(self):
+        return iter(self._get())
+
+    def __len__(self):
+        return len(self._get())
+
+    def get(self, key, default=None):
+        return self._get().get(key, default)
+
+
+AUTH = _AuthProxy()
+
+
 @pytest.fixture
 def auth_headers():
     """Аккаунт с тарифом team: проверки идут только по токену.

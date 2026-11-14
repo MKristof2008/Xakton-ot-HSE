@@ -122,6 +122,15 @@ export function clearToken(): void {
 }
 
 /** Есть ли сохранённая сессия. Без неё интерфейс показывает вход. */
+/** Гостевой токен для внутренних вызовов, если человек ещё не вошёл. */
+export async function ensureUser(): Promise<void> {
+  if (readToken()) return;
+  const user = await request<{ id: string; token: string }>('/users', {
+    method: 'POST',
+  });
+  writeToken(user.token);
+}
+
 export function hasSession(): boolean {
   return Boolean(readToken());
 }
