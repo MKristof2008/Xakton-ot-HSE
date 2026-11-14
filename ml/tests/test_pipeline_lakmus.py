@@ -36,7 +36,10 @@ async def test_pipeline_image_returns_check_result():
     # InputType.image превращался в строку «InputType.image», и набор
     # сигналов молча откатывался к текстовому.
     ids = {s.id for s in result.signals}
-    assert ids == {"metadata", "ai_artifacts", "manipulation", "source_search", "screenshot"}
+    assert ids == {
+        "metadata", "ai_artifacts", "manipulation",
+        "source_search", "screenshot", "uniqueness", "pricing",
+    }
     assert not ids & {"claims", "kb_facts", "quotes"}
     assert result.trust.uncertainty >= 0
 
@@ -49,7 +52,8 @@ def test_default_signals_respects_input_type_enum():
     url = {type(s).__name__ for s in default_signals(InputType.url)}
 
     assert image == {"MetadataSignal", "AIArtifactsSignal", "ManipulationSignal",
-                     "SourceSearchSignal", "ScreenshotSignal"}
+                     "SourceSearchSignal", "ScreenshotSignal",
+                     "UniquenessSignal", "PricingSignal"}
     assert text == {"ClaimsSignal", "KbFactsSignal", "SourcesSignal", "QuotesSignal",
                     "RhetoricSignal", "MachineTextSignal"}
     # Строка вместо enum тоже должна работать — backend может передать её.

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -44,8 +45,13 @@ CREATE TABLE IF NOT EXISTS users (
     plan        TEXT NOT NULL DEFAULT 'free',
     token       TEXT NOT NULL UNIQUE,
     created_at  TEXT NOT NULL,
-    expires_at  TEXT
+    expires_at  TEXT,
+    email       TEXT,
+    pass_hash   TEXT,
+    name        TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)
+    WHERE email IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS payments (
     id            TEXT PRIMARY KEY,
@@ -106,6 +112,26 @@ def db_path() -> Path:
 @contextmanager
 def connect() -> Iterator[sqlite3.Connection]:
     path = db_path()
+    # «:memory:» — не файл: каждое соединение создавало бы пустую базу,
+    # и пользователь исчезал между запросами. Держим одно общее соединение
+    # с общим кэшем, чтобы in-memory база жила весь процесс.
+    if str(path) == ":memory:":
+        global _MEMORY_CONN
+        try:
+            _MEMORY_CONN  # type: ignore[name-defined]
+        except NameError:
+            _MEMORY_CONN = sqlite3.connect(
+                "file:witness_mem?mode=memory&cache=shared",
+                uri=True, timeout=10, check_same_thread=False,
+            )
+            _MEMORY_CONN.row_factory = sqlite3.Row
+        _MEMORY_CONN.executescript(SCHEMA)
+        try:
+            yield _MEMORY_CONN
+            _MEMORY_CONN.commit()
+        finally:
+            pass
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
@@ -130,6 +156,7 @@ def now_iso() -> str:
 # ---------- пользователи и тарифы ----------
 
 def create_user(plan: str = "free") -> dict[str, Any]:
+    """Гостевой пользователь без пароля. Нужен для внутренних сценариев."""
     uid = f"usr_{secrets.token_hex(4)}"
     token = secrets.token_urlsafe(24)
     with connect() as conn:
@@ -138,6 +165,81 @@ def create_user(plan: str = "free") -> dict[str, Any]:
             (uid, plan, token, now_iso()),
         )
     return {"id": uid, "plan": plan, "token": token}
+
+
+# ---------- регистрация и вход ----------
+
+#: Параметры хеширования пароля. pbkdf2 на stdlib: без внешних зависимостей.
+_PBKDF2_ROUNDS = 200_000
+
+
+def hash_password(password: str, salt: Optional[str] = None) -> str:
+    """Пароль → «соль$хеш». Соль случайная, если не передана."""
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), _PBKDF2_ROUNDS
+    )
+    return f"{salt}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Сравнение без утечки по времени."""
+    if not stored or "$" not in stored:
+        return False
+    salt, expected = stored.split("$", 1)
+    actual = hash_password(password, salt).split("$", 1)[1]
+    return hmac.compare_digest(actual, expected)
+
+
+def register_user(email: str, password: str, name: str = "") -> Optional[dict[str, Any]]:
+    """Создать аккаунт. None — email уже занят."""
+    email = (email or "").strip().lower()
+    uid = f"usr_{secrets.token_hex(4)}"
+    token = secrets.token_urlsafe(24)
+    try:
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO users(id, plan, token, created_at, email, pass_hash, name)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (uid, "free", token, now_iso(), email, hash_password(password), name.strip()),
+            )
+    except sqlite3.IntegrityError:
+        return None
+    return {
+        "id": uid, "plan": "free", "token": token, "email": email,
+        "name": name.strip(), "expires_at": None,
+    }
+
+
+def authenticate(email: str, password: str) -> Optional[dict[str, Any]]:
+    """Проверить email и пароль. None — неверные данные."""
+    email = (email or "").strip().lower()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE email = ?", (email,)
+        ).fetchone()
+    if not row or not verify_password(password, row["pass_hash"] or ""):
+        return None
+    user = dict(row)
+    # Новый токен на каждый вход: старые сессии не остаются валидными
+    # навсегда, если токен утёк.
+    token = secrets.token_urlsafe(24)
+    with connect() as conn:
+        conn.execute("UPDATE users SET token = ? WHERE id = ?", (token, user["id"]))
+    user["token"] = token
+    return user
+
+
+def public_user(user: dict[str, Any]) -> dict[str, Any]:
+    """То, что можно отдавать наружу: без хеша пароля."""
+    return {
+        "id": user["id"],
+        "plan": user["plan"],
+        "email": user.get("email"),
+        "name": user.get("name") or "",
+        "expires_at": user.get("expires_at"),
+        "created_at": user.get("created_at"),
+    }
 
 
 def user_by_token(token: str) -> Optional[dict[str, Any]]:

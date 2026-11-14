@@ -162,6 +162,10 @@ export interface PlanInfo {
 export interface Me {
   id: string;
   plan: Plan;
+  email?: string | null;
+  name?: string;
+  expires_at?: string | null;
+  created_at?: string | null;
   quota_left?: number;
   quota_per_day?: number;
 }

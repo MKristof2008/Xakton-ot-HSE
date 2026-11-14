@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from . import reputation
 from .sources import (
     CatalogProvider,
     FetchedSource,
@@ -106,17 +107,22 @@ _CONTRAST = re.compile(r"\b(но|однако|зато|хотя|впрочем)\
 
 #: Признаки будущего: прогноз, обещание, ожидание. Такое нельзя назвать
 #: ложью — событие ещё не наступило.
+#: Признаки будущего: прогноз, обещание, ожидание. Такое нельзя назвать
+#: ложью — событие ещё не наступило.
 _FUTURE = re.compile(
-    r"\b(завтра|послезавтра|ожидается|ожидают|прогноз|объявят|"
-    r"планируют|планируется|собираются|в следующем году|со следующей недели|"
-    r"скоро|в ближайшее время)\b",
+    "(завтра|послезавтра|ожидается|ожидают|прогноз|объявят|"
+    "планируют|планируется|собираются|в следующем году|со следующей недели|"
+    "скоро|в ближайшее время|подорожает|подешевеет|вырастет|вырастут|"
+    "упадёт|упадут|снизится|повысится|введут|отменят|повысят|снизят)",
     re.I,
 )
 
 
 #: Безымянные заглушки: утверждение о «компании X» проверить нельзя.
-_VAGUE = re.compile(r"(компания [a-zх]|некая компания|некий|некие|"
-                    r"один человек|какой-то)", re.I)
+_VAGUE = re.compile(
+    r"(компания\s+[a-zа-яё]|некая\s+компания|некий|некие|один\s+человек|какой-то)",
+    re.I,
+)
 
 
 def _is_vague(text: str) -> bool:
@@ -318,6 +324,19 @@ def _judge_by_overlap(claim: str, sources: Sequence[FetchedSource]) -> ClaimFind
     claim_numbers = _content_numbers(claim)
     claim_negated = _is_negated(claim)
     claim_words = {w for w in re.findall(r"[а-яa-z]{5,}", _norm(claim))}
+    # Одно-два слова — не утверждение, а тема. «Путин показал» подходит
+    # к любой новости про Путина, поэтому совпадение по ним ничего не
+    # доказывает. Такие запросы уходят в «недостаточно данных».
+    if len(claim_words) <= 2 and not claim_numbers:
+        return ClaimFinding(
+            text=claim,
+            status="insufficient",
+            explanation=(
+                "Слишком короткое утверждение: одних этих слов "
+                "недостаточно, чтобы подтвердить событие."
+            ),
+            limitations=["Нужны подробности: что, где и когда."],
+        )
 
     best: Optional[ClaimFinding] = None
     for source in sources:
@@ -361,17 +380,22 @@ def _judge_by_overlap(claim: str, sources: Sequence[FetchedSource]) -> ClaimFind
                 trusted=trusted,
             )
         else:
+            # Пересечение слов — не доказательство. «Путин показал кулак»
+            # и «Путин показал пенис» имеют общие слова, но это разные
+            # события. Подтверждение возможно только с дословной цитатой,
+            # поэтому здесь его не ставим вовсе.
             finding = ClaimFinding(
                 text=claim,
-                status="supported",
-                explanation=f"Совпадает с источником: {source.title}.",
+                status="insufficient",
+                explanation=(
+                    f"В источнике «{source.title}» нет подтверждения: "
+                    "событие не совпадает."
+                ),
                 quote="",
                 source_title=source.title,
                 source_url=source.url,
                 trusted=trusted,
             )
-        if finding.status == "supported" and trusted:
-            return finding
         if best is None:
             best = finding
 
@@ -428,8 +452,25 @@ def llm_enabled() -> bool:
     return bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL"))
 
 
-def _level_for(findings: Sequence[ClaimFinding]) -> tuple[str, str, int, float]:
-    """Уровень, вердикт, балл и неуверенность из набора находок."""
+#: Строгий режим: если поиск был, но подтверждений нет — считаем фейком.
+#: Включается STRICT_NOT_FOUND=1 (по умолчанию включён: так просил заказчик).
+#: Отличие от обычного режима только в вердикте, объяснение остаётся честным.
+def _strict_not_found() -> bool:
+    return os.environ.get("STRICT_NOT_FOUND", "1") not in ("0", "false", "no")
+
+
+def _level_for(
+    findings: Sequence[ClaimFinding],
+    *,
+    searched: bool = False,
+    strict_allowed: bool = True,
+) -> tuple[str, str, int, float]:
+    """Уровень, вердикт, балл и неуверенность из набора находок.
+
+    `searched` — были ли источники вообще. Только в этом случае отсутствие
+    подтверждения можно считать признаком выдумки: если искать было негде,
+    честный ответ — «непонятно».
+    """
     if not findings:
         return "fog", "непонятно", 50, 1.0
 
@@ -446,6 +487,11 @@ def _level_for(findings: Sequence[ClaimFinding]) -> tuple[str, str, int, float]:
     if supported and contradicted:
         return "fog", "непонятно", 50, 0.6
     if unknown:
+        # Строгий режим: источники проверялись, но ни один не подтвердил.
+        # Тогда считаем фейком — с честным объяснением, что это вывод
+        # из отсутствия подтверждений, а не прямое опровержение.
+        if searched and strict_allowed and _strict_not_found():
+            return "likely_fake", "фейк", 25, 0.55
         return "fog", "непонятно", 50, 0.7
     return "fog", "непонятно", 50, 0.5
 
@@ -478,7 +524,7 @@ async def run_check(
     #    неузнаваемое) и быстр (0 вызовов модели на известных фактах).
     kb_direct = _judge_with_kb(text)
     if kb_direct is not None and kb_direct.status in ("supported", "contradicted"):
-        level, verdict, score, uncertainty = _level_for([kb_direct])
+        level, verdict, score, uncertainty = _level_for([kb_direct], searched=True)
         return CheckOutcome(
             claims=[kb_direct],
             verdict=verdict,
@@ -559,6 +605,22 @@ async def run_check(
         if len(sources) >= 5:
             break
 
+    # 2a. Репутация доменов. Сатирический или известный фейковый сайт
+    # нельзя использовать как доказательство: иначе модель «подтвердит»
+    # выдумку ссылкой на саму выдумку. Такие страницы остаются только как
+    # проверяемый объект — их содержимое помечается и не идёт в опору.
+    satire_sources: list[FetchedSource] = []
+    trusted_sources: list[FetchedSource] = []
+    for source in sources:
+        info = reputation.classify(source.url or source.domain)
+        source.reputation = info.reputation  # type: ignore[attr-defined]
+        if info.must_not_be_evidence:
+            satire_sources.append(source)
+        else:
+            trusted_sources.append(source)
+    # Модели отдаём только те источники, которым можно доверять как опоре.
+    evidence_sources = trusted_sources
+
     # 3. Оценка
     findings: list[ClaimFinding] = []
     model_silent = False
@@ -579,7 +641,7 @@ async def run_check(
         finding = ClaimFinding(text=claim, status="insufficient",
                                explanation="В доступных источниках нет подтверждения.")
         if llm_used and evaluate_one_with_llm is not None:
-            answer = await evaluate_one_with_llm(claim, sources)
+            answer = await evaluate_one_with_llm(claim, evidence_sources)
             if answer is None:
                 return _judge_by_overlap(claim, sources), True
             finding.status = answer["status"]
@@ -595,7 +657,7 @@ async def run_check(
                 # умеет «согласиться» с абсурдом, если в выдаче есть
                 # что-то похожее по словам.
                 source = next(
-                    (s for s in sources
+                    (s for s in evidence_sources
                      if finding.quote and _quote_in_source(finding.quote, s.content)),
                     None,
                 )
@@ -611,24 +673,20 @@ async def run_check(
                     finding.trusted = is_trusted(source.url)
             elif finding.quote:
                 source = next(
-                    (s for s in sources if _quote_in_source(finding.quote, s.content)),
+                    (s for s in evidence_sources
+                     if _quote_in_source(finding.quote, s.content)),
                     None,
                 )
-                if source is not None:
+                # Цитата без привязки к статусу вводит в заблуждение:
+                # в карточке появляется фраза, которая ничего не доказывает.
+                # Оставляем её только при осмысленном вердикте.
+                if source is not None and finding.status in ("contradicted", "context"):
                     finding.source_title = source.title
                     finding.source_url = source.url
                     finding.trusted = is_trusted(source.url)
                 else:
                     finding.quote = ""
         return finding, False
-
-    # Безымянное утверждение не проверить: «компания X купила компанию Y».
-    if _is_vague(text):
-        for finding in findings:
-            finding.status = "insufficient"
-            finding.explanation = (
-                "В утверждении нет конкретных имён и чисел: проверить нечего."
-            )
 
     # Утверждения оцениваются параллельно: три запроса к модели идут
     # одновременно, а не друг за другом.
@@ -639,20 +697,98 @@ async def run_check(
 
     # Прогноз или обещание не может быть ложью: событие ещё не наступило.
     # «Завтра ожидается снег» — не фейк, даже если прогноз не сбудется.
-    # Важно: проверка идёт ПОСЛЕ оценки. Раньше она стояла до неё, когда
-    # findings был пуст, и не срабатывала вовсе — модель объявляла фейком
-    # «Мобилизацию объявят со следующей недели».
+    # Безымянное утверждение не проверить: «компания X купила компанию Y».
+    # Важно: этот блок стоит ПОСЛЕ оценки, иначе правит пустой список.
+    if _is_vague(text):
+        for finding in findings:
+            finding.status = "insufficient"
+            finding.explanation = (
+                "В утверждении нет конкретных имён и чисел: проверить нечего."
+            )
+
+    # Прогноз нельзя ни подтвердить, ни опровергнуть: событие не наступило.
+    # Проверка стоит ПОСЛЕ оценки: до неё findings пуст и правка не работает.
     if future_text:
         for finding in findings:
-            if finding.status == "contradicted":
+            # Прогноз нельзя ни подтвердить, ни опровергнуть: событие ещё
+            # не наступило. Любой вердикт, кроме «непонятно», здесь ложь.
+            if finding.status in ("contradicted", "supported"):
                 finding.status = "insufficient"
                 finding.explanation = (
                     "Это прогноз о будущем: проверить его сейчас нельзя."
                 )
 
-    level, verdict, score, uncertainty = _level_for(findings)
+    # Если входная ссылка ведёт на сатирический или фейковый сайт —
+    # это прямой ответ, независимо от того, что нашла модель.
+    satire_note = ""
+    if url:
+        url_info = reputation.classify(url)
+        if url_info.reputation == "satire":
+            findings = [ClaimFinding(
+                text=text[:300],
+                status="contradicted",
+                explanation=(
+                    "Источник — сатирическое издание. Такие материалы "
+                    "выдумываются намеренно и не являются фактами."
+                ),
+                source_title=url_info.host,
+                source_url=url,
+                trusted=False,
+                limitations=["Сайт относится к сатирическим изданиям."],
+            )]
+            satire_note = "Сатирическое издание"
+        elif url_info.reputation == "untrusted":
+            findings = [ClaimFinding(
+                text=text[:300],
+                status="contradicted",
+                explanation=(
+                    "Источник известен публикацией выдумок и не может "
+                    "считаться доказательством."
+                ),
+                source_title=url_info.host,
+                source_url=url,
+                trusted=False,
+                limitations=["Домен в списке недостоверных."],
+            )]
+            satire_note = "Недостоверный источник"
+
+    # Строгий режим не применяется к прогнозам и безымянным утверждениям:
+    # «завтра ожидается снег» — не фейк, даже если подтверждения нет.
+    strict_allowed = not future_text and not _is_vague(text)
+    level, verdict, score, uncertainty = _level_for(
+        findings, searched=bool(evidence_sources), strict_allowed=strict_allowed
+    )
     limitations = [lim for f in findings for lim in f.limitations]
-    if not sources:
+    # Понятная причина «непонятно»: пользователь должен знать, почему
+    # система не дала ответ, а не гадать, сломалась она или нет.
+    if verdict == "непонятно":
+        if not sources:
+            verdict_reason = (
+                "Недостаточно подтверждений: в доступных источниках "
+                "ничего не нашлось. Это не значит, что новость ложная."
+            )
+        elif not evidence_sources:
+            verdict_reason = (
+                "Все найденные источники недостоверны: подтверждать нечем."
+            )
+        else:
+            verdict_reason = (
+                "Недостаточно подтверждений: источники тему знают, "
+                "но самого события в них нет."
+            )
+        limitations.append(verdict_reason)
+
+    if satire_sources and not satire_note:
+        hosts = ", ".join(sorted({s.domain or s.title for s in satire_sources})[:3])
+        limitations.append(
+            f"Среди найденного есть недостоверные сайты ({hosts}) — "
+            "они исключены из доказательств."
+        )
+    if not evidence_sources and sources:
+        limitations.append(
+            "Все найденные источники недостоверны: подтверждать нечем."
+        )
+    elif not sources:
         limitations.append("Источники не найдены: сверять утверждение не с чем.")
     if model_silent:
         limitations.append(

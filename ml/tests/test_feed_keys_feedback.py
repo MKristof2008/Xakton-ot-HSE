@@ -39,7 +39,7 @@ def new_user(plan: str = "free") -> str:
 # ---------- лента ----------
 
 def test_feed_returns_items_with_passport():
-    client.post("/api/check", json={"text": TEXT})
+    client.post("/api/check", json={"text": TEXT}, headers={"X-Token": new_user()})
     body = client.get("/api/feed").json()
     assert body["items"], "после проверки лента не должна быть пустой"
     item = body["items"][0]
@@ -104,11 +104,11 @@ def test_revoked_key_stops_working():
     ok = client.delete(f"/api/keys/{created['id']}", headers={"X-Token": token})
     assert ok.status_code == 200
 
-    body = client.post(
+    r = client.post(
         "/api/check", json={"text": TEXT}, headers={"X-Api-Key": created["key"]}
-    ).json()
-    # Отозванный ключ не даёт тарифа: ответ как у анонимного пользователя.
-    assert body["plan"] == "free"
+    )
+    # Отозванный ключ не даёт доступа: запрос отклоняется, как без входа.
+    assert r.status_code == 401
 
 
 def test_cannot_revoke_someone_elses_key():
@@ -122,7 +122,7 @@ def test_cannot_revoke_someone_elses_key():
 # ---------- обратная связь ----------
 
 def test_feedback_accepted_and_counted():
-    check = client.post("/api/check", json={"text": TEXT}).json()
+    check = client.post("/api/check", json={"text": TEXT}, headers={"X-Token": new_user()}).json()
     r = client.post(
         "/api/feedback",
         json={"check_id": check["id"], "verdict_ok": False, "expected": "фейк"},
@@ -142,7 +142,7 @@ def test_feedback_unknown_check_rejected():
 
 
 def test_feedback_bad_expected_rejected():
-    check = client.post("/api/check", json={"text": TEXT}).json()
+    check = client.post("/api/check", json={"text": TEXT}, headers={"X-Token": new_user()}).json()
     r = client.post(
         "/api/feedback",
         json={"check_id": check["id"], "verdict_ok": False, "expected": "может быть"},

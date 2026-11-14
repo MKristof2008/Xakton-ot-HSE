@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { logout } from '../api/client';
 import type { Me } from '../types';
 import type { Tab } from '../lib/tabs';
 import { BrandMark } from './icons';
@@ -14,10 +16,18 @@ interface Props {
   tab: Tab;
   me: Me | null;
   onNavigate: (tab: Tab) => void;
+  onLogout: () => void;
+  onNeedAuth: (reason: string) => void;
 }
 
-export function Header({ tab, me, onNavigate }: Props) {
+export function Header({ tab, me, onNavigate, onLogout, onNeedAuth }: Props) {
   const paid = me?.plan === 'pro' || me?.plan === 'team';
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  async function handleLogout() {
+    await logout();
+    onLogout();
+  }
 
   return (
     <header className="header">
@@ -43,9 +53,68 @@ export function Header({ tab, me, onNavigate }: Props) {
           ))}
         </nav>
 
-        <span className={`plan-chip plan-chip--${me?.plan ?? 'free'}`}>
-          {paid ? 'Подписка' : 'Бесплатно'}
-        </span>
+        {!me && (
+          <button
+            type="button"
+            className="btn btn--ghost header__login"
+            onClick={() => onNeedAuth('Войдите, чтобы проверять сообщения и видеть свою историю.')}
+          >
+            Войти
+          </button>
+        )}
+
+        {me && (
+        <div className="account">
+          <button
+            type="button"
+            className="account__btn"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <span className={`plan-chip plan-chip--${me?.plan ?? 'free'}`}>
+              {paid ? 'Подписка' : 'Бесплатно'}
+            </span>
+            <span className="account__avatar" aria-hidden="true">
+              {(me?.name || me?.email || '?').slice(0, 1).toUpperCase()}
+            </span>
+          </button>
+
+          {menuOpen && (
+            <>
+              <div
+                className="account__scrim"
+                onClick={() => setMenuOpen(false)}
+                aria-hidden="true"
+              />
+              <div className="account__menu" role="menu">
+                <div className="account__who">
+                  <strong>{me?.name || 'Без имени'}</strong>
+                  <span>{me?.email}</span>
+                </div>
+                {me?.expires_at && paid && (
+                  <p className="account__row">
+                    Подписка до {me.expires_at.slice(0, 10)}
+                  </p>
+                )}
+                {typeof me?.quota_left === 'number' && !paid && (
+                  <p className="account__row">
+                    Осталось сегодня: {me.quota_left} из {me.quota_per_day}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className="account__logout"
+                  role="menuitem"
+                  onClick={handleLogout}
+                >
+                  Выйти
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        )}
       </div>
     </header>
   );

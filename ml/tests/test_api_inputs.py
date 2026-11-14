@@ -21,6 +21,16 @@ os.environ.setdefault("VERDICT_DB", ":memory:")
 from backend.main import app  # noqa: E402
 
 client = TestClient(app)
+# Проверка доступна только с аккаунтом. Токен берём на каждый тест:
+# in-memory база общая для процесса, и токен, созданный при импорте,
+# к моменту теста может относиться к уже пересозданной базе.
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _fresh_auth(monkeypatch):
+    global AUTH
+    AUTH = {"X-Token": client.post("/api/users").json()["token"]}
 
 TEXT = "СРОЧНО! ЦБ запретил наличные с 1 марта 2026 года!"
 
@@ -33,7 +43,7 @@ PNG_1PX = bytes.fromhex(
 
 
 def test_text_check_returns_contract():
-    r = client.post("/api/check", json={"text": TEXT})
+    r = client.post("/api/check", headers=AUTH, json={"text": TEXT})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["verdict"] in ("правда", "фейк", "непонятно")
@@ -42,14 +52,14 @@ def test_text_check_returns_contract():
 
 
 def test_short_text_rejected():
-    r = client.post("/api/check", json={"text": "ой"})
+    r = client.post("/api/check", headers=AUTH, json={"text": "ой"})
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "BAD_INPUT"
 
 
 def test_url_check_accepted():
     """Ссылка без текста — валидный вход, даже если страница не скачалась."""
-    r = client.post("/api/check", json={"url": "https://example.invalid/news/1"})
+    r = client.post("/api/check", headers=AUTH, json={"url": "https://example.invalid/news/1"})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["verdict"] in ("правда", "фейк", "непонятно")
@@ -57,7 +67,7 @@ def test_url_check_accepted():
 
 
 def test_url_without_scheme_rejected():
-    r = client.post("/api/check", json={"url": "example.com/news"})
+    r = client.post("/api/check", headers=AUTH, json={"url": "example.com/news"})
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "BAD_INPUT"
 
@@ -65,6 +75,7 @@ def test_url_without_scheme_rejected():
 def test_image_check_via_multipart():
     r = client.post(
         "/api/check",
+        headers=AUTH,
         files={"image": ("shot.png", PNG_1PX, "image/png")},
     )
     assert r.status_code == 200, r.text
@@ -76,6 +87,7 @@ def test_image_check_via_multipart():
 def test_image_wrong_type_rejected():
     r = client.post(
         "/api/check",
+        headers=AUTH,
         files={"image": ("doc.pdf", b"%PDF-1.4", "application/pdf")},
     )
     assert r.status_code == 422
@@ -86,6 +98,7 @@ def test_text_with_image_together():
     """Скриншот плюс подпись: текст идёт в проверку, картинка — в сигналы."""
     r = client.post(
         "/api/check",
+        headers=AUTH,
         data={"text": TEXT},
         files={"image": ("shot.png", PNG_1PX, "image/png")},
     )
