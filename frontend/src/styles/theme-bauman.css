@@ -1,0 +1,625 @@
+/* ============================================================
+   Тема «Инженерная редакция».
+
+   Смесь двух школ:
+     • МГТУ им. Баумана — глубокий инженерный синий, чертёжная сетка,
+       острые углы, моноширинные цифры, тонкие технические линии;
+     • медиахолдинг — крупная типографика, живой акцент, ритм полосы.
+
+   Ничего не меняет в разметке: только оформление. Название «Ревизор»
+   и знак-галочка остаются своими.
+   ============================================================ */
+
+:root {
+  /* бумага: не тёплая, а «миллиметровка» — холодная, чуть синеватая */
+  --paper: #eef2f8;
+  --paper-2: #e2e8f2;
+  --surface: #ffffff;
+  --ink: #0a1a33;
+  --muted: #56637a;
+  --faint: #8b97ab;
+  --line: #cfd8e6;
+  --line-strong: #a9b6cb;
+
+  /* смысловые тона: строгие, без «светофора» */
+  --ok: #0f6b45;
+  --ok-soft: #e2f1ea;
+  --ok-line: #b3d9c8;
+  --bad: #c02a1e;
+  --bad-soft: #fbe7e3;
+  --bad-line: #edc2b9;
+  --fog: #4a5a75;
+  --fog-soft: #e6eaf2;
+  --fog-line: #ccd5e5;
+
+  /* фирменный синий Бауманки и акцент медиахолдинга */
+  --accent: #12409b;
+  --accent-strong: #06285f;
+  --accent-soft: #dbe6fb;
+  --accent-line: #9fb9e8;
+  --signal: #e03c31;
+
+  /* инверсная плоскость */
+  --inv-bg: #0a1a33;
+  --inv-fg: #f3f6fb;
+  --inv-muted: #9fb0c9;
+  --inv-line: #24374f;
+
+  /* типографика: гротеск для текста, моно для цифр */
+  --font-display: 'Golos Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial,
+    sans-serif;
+  --font-text: 'Golos Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial,
+    sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas,
+    'Courier New', monospace;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --page: 1040px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #081226;
+    --paper-2: #0e1c33;
+    --surface: #0c1a2e;
+    --ink: #e8eefa;
+    --muted: #94a5bf;
+    --faint: #6f819c;
+    --line: #1d2d47;
+    --line-strong: #2c405e;
+
+    --ok: #6fd3a4;
+    --ok-soft: #0c2a1f;
+    --ok-line: #1e4a37;
+    --bad: #ff8f7d;
+    --bad-soft: #2e1512;
+    --bad-line: #53241d;
+    --fog: #a8b8d0;
+    --fog-soft: #14233a;
+    --fog-line: #26374f;
+
+    --accent: #6c9cff;
+    --accent-strong: #a9c4ff;
+    --accent-soft: #10233f;
+    --accent-line: #24406b;
+    --signal: #ff6b5c;
+
+    --inv-bg: #e8eefa;
+    --inv-fg: #081226;
+    --inv-muted: #4a5c78;
+    --inv-line: #c3d0e4;
+
+    color-scheme: dark;
+  }
+}
+
+/* -------------------------------------------------- фон: миллиметровка */
+
+body {
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(to right, rgba(18, 64, 155, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(18, 64, 155, 0.055) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Точки бумаги из базовой темы здесь лишние: поверх сетки это шум. */
+body::before {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-image:
+      linear-gradient(to right, rgba(108, 156, 255, 0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(108, 156, 255, 0.07) 1px, transparent 1px);
+  }
+}
+
+/* Отступ под шапку-линейку: она чуть выше базовой. */
+.main {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 40px 24px 72px;
+}
+
+/* ------------------------------------------------------------ шапка */
+
+.header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--ink);
+}
+
+/* тонкая вторая линия под шапкой — «двойная линейка» чертежа */
+.header::after {
+  content: '';
+  display: block;
+  height: 1px;
+  background: var(--line);
+}
+
+.header__inner {
+  max-width: var(--page);
+  height: 66px;
+  gap: 24px;
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Знак: из скруглённого квадрата — в инженерную рамку с уголками. */
+.brand__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.brand:hover .brand__mark {
+  transform: none;
+  background: var(--accent-strong);
+}
+
+.nav__link {
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-radius: 4px;
+}
+
+.nav__link::after {
+  height: 2px;
+  background: var(--accent);
+  bottom: 0;
+}
+
+.nav__link[aria-current='page'] {
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------ первый экран */
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* В базовой теме надзаголовок серый — здесь он несёт акцент. */
+.hero .eyebrow,
+.verdict .eyebrow,
+.passport .eyebrow {
+  color: var(--accent);
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(30px, 4.8vw, 50px);
+  line-height: 1.06;
+  letter-spacing: -0.022em;
+}
+
+.hero__title em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Акцентная плашка-маркер: как выделение в пресс-релизе. */
+.hero__title em::after {
+  content: '';
+  display: block;
+  height: 3px;
+  margin-top: 6px;
+  background: var(--signal);
+  width: 100%;
+  transform-origin: left;
+  animation: rule-x var(--dur-3) var(--ease-out) 120ms both;
+}
+
+.hero__lead {
+  font-size: 16.5px;
+  color: var(--muted);
+  max-width: 64ch;
+}
+
+/* ------------------------------------------------------------- панель */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 26px 26px 22px;
+  box-shadow: 0 1px 0 var(--line), 0 12px 32px -28px rgba(10, 26, 51, 0.55);
+  position: relative;
+}
+
+/* Уголки-«засечки»: рамка чертежа. */
+.panel::before,
+.panel::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+}
+
+.panel::before {
+  top: -1px;
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+.panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: 0;
+  border-top: 0;
+}
+
+.field__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field__hint {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--faint);
+}
+
+.textarea,
+.input {
+  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 16px;
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+
+.textarea:hover,
+.input:hover {
+  border-color: var(--muted);
+}
+
+.textarea:focus,
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.counter {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.counter--near {
+  color: var(--signal);
+}
+
+/* ------------------------------------------------------------- кнопки */
+
+.btn {
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 12px 24px;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  box-shadow: 0 8px 22px -12px rgba(18, 64, 155, 0.8);
+  transform: translateY(-1px);
+}
+
+.btn--ghost {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* -------------------------------------------------------------- чипы */
+
+.chips {
+  border-top: 1px solid var(--line);
+}
+
+.chips__label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--faint);
+}
+
+.chip {
+  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+/* ------------------------------------------------------------ вердикт */
+
+.verdict {
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  padding: 30px 32px 28px 40px;
+  background:
+    linear-gradient(90deg, var(--tone-soft) 0%, transparent 42%),
+    var(--surface);
+  box-shadow: 0 1px 0 var(--line), 0 20px 46px -40px rgba(10, 26, 51, 0.7);
+}
+
+/* Полоса слева — не 6px, а тонкая линейка с насечками. */
+.verdict::before {
+  width: 4px;
+  background: var(--tone);
+}
+
+.verdict::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 16px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--tone-line) 0 1px,
+    transparent 1px 8px
+  );
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.verdict__word {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  text-transform: uppercase;
+}
+
+.verdict__sub {
+  color: var(--muted);
+}
+
+.score__num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--accent);
+}
+
+.score__of {
+  font-family: var(--font-mono);
+  color: var(--faint);
+}
+
+.score__label,
+.meter + .score__label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--faint);
+}
+
+.meter {
+  height: 4px;
+  border-radius: 0;
+  background: var(--paper-2);
+}
+
+.meter__fill {
+  border-radius: 0;
+  background: var(--tone, var(--accent));
+}
+
+.verdict__meta {
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+}
+
+.verdict__meta strong {
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------- пейволл и разбор */
+
+.paywall {
+  border-radius: 4px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.paywall h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.breakdown__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+/* Сигналы: номер как в техзадании — моно, с ведущим нулём. */
+.signal__name {
+  font-weight: 600;
+}
+
+.signal__strength {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+/* ------------------------------------------------------------- теги */
+
+.tag {
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 4px 8px;
+}
+
+/* --------------------------------------------------------- топы и история */
+
+.top-item {
+  border-bottom: 1px solid var(--line);
+}
+
+.top-item__rank {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+}
+
+.top-item__text {
+  font-size: 16.5px;
+  font-weight: 500;
+  line-height: 1.42;
+}
+
+.top-item__meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.top-item__anchor:hover .top-item__text {
+  color: var(--accent);
+  text-decoration: none;
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+/* ------------------------------------------------------------- скелетон */
+
+.skeleton {
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.skeleton__step {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.skeleton__step.is-active {
+  color: var(--accent);
+}
+
+.skeleton__step.is-active .skeleton__dot {
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------------- планы */
+
+.plan {
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.plan--recommended {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.plan__price {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------- подвал */
+
+.site-footer {
+  border-top: 2px solid var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+}
+
+/* --------------------------------------------------------------- мелочи */
+
+code,
+code.passport__url {
+  font-family: var(--font-mono);
+  background: var(--paper-2);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 680px) {
+  .main {
+    padding: 24px 16px 56px;
+  }
+
+  .panel {
+    padding: 20px 18px 18px;
+  }
+
+  .verdict {
+    padding: 24px 20px 22px 30px;
+  }
+
+  .brand {
+    font-size: 16px;
+  }
+}
