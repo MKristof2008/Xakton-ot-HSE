@@ -1,0 +1,8 @@
+# Зависимости для прогона тестов целиком (ml + backend).
+# Нужны, потому что API-тесты импортируют backend.main: им требуется
+# fastapi, httpx, python-multipart и Pillow — их нет в ml/requirements.txt.
+#
+#   pip install -r requirements-test.txt
+#   python -m pytest ml -q
+-r ml/requirements.txt
+-r backend/requirements.txt
