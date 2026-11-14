@@ -101,15 +101,55 @@ def _years(text: str) -> set[int]:
 
 def find_topic(kb: dict[str, Any], text: str) -> Optional[dict[str, Any]]:
     """Тема по ключевым словам. Берём тему с самым длинным совпавшим словом."""
+    topics = find_topics(kb, text)
+    return topics[0] if topics else None
+
+
+def find_topics(kb: dict[str, Any], text: str) -> list[dict[str, Any]]:
+    """Все темы, чьи ключевые слова встретились, от лучшей к худшей.
+
+    Сообщение может задевать несколько тем («индексация пенсий и тарифы
+    ЖКХ»), поэтому сигнал перебирает их, а не хватается за первую.
+    """
     low = _norm(text)
-    best: Optional[dict[str, Any]] = None
-    best_len = 0
+    scored: list[tuple[int, dict[str, Any]]] = []
     for topic in kb.get("topics", []):
+        best = 0
         for keyword in topic.get("keywords", []):
             k = _norm(keyword)
-            if k and k in low and len(k) > best_len:
-                best, best_len = topic, len(k)
-    return best
+            if k and k in low:
+                best = max(best, len(k))
+        if best:
+            scored.append((best, topic))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [topic for _, topic in scored]
+
+
+def _claim_matches_fact(claim: str, fact: dict[str, Any]) -> bool:
+    """О том же ли факте речь.
+
+    Тема может быть общей, а утверждения — разными: «индексация пенсий»
+    и «пенсионный возраст 65 лет» лежат в одной теме, но это разные факты.
+    У каждой записи базы есть ``match_keywords`` — свои слова-маркеры.
+    Если ни одного нет, сверять числа нельзя: получим ложное опровержение.
+    """
+    low = _norm(claim)
+    markers = [str(k) for k in fact.get("match_keywords", [])]
+    if not markers:
+        return True  # запись без маркеров считаем универсальной для темы
+    return any(_norm(m) in low for m in markers)
+
+
+def _is_negated(text: str) -> bool:
+    """Есть ли в утверждении отрицание.
+
+    Простая проверка по маркерам: «не», «нет», «никогда», «не принимал».
+    Ложные срабатывания возможны («не только»), поэтому используется
+    только вместе со сверкой темы, а не как самостоятельный вердикт.
+    """
+    low = _norm(text)
+    markers = ("не ", "нет ", "никогда", "не принимал", "не было", "не будет", "не планир")
+    return any(m in low for m in markers)
 
 
 def check_against_topic(topic: dict[str, Any], text: str) -> tuple[Verdict, float, str, dict[str, Any]]:
@@ -120,6 +160,44 @@ def check_against_topic(topic: dict[str, Any], text: str) -> tuple[Verdict, floa
     facts = topic.get("facts", [])
     refuted = [f for f in facts if f.get("verdict") == "false_claim"]
     confirmed = [f for f in facts if f.get("verdict") == "true"]
+
+    # 0. Речь вообще о другом факте внутри той же темы — не сверяем.
+    #    «Индексация пенсий с 1 июля» не должна опровергаться записью
+    #    про пенсионный возраст только потому, что тема общая.
+    relevant_refuted = [f for f in refuted if _claim_matches_fact(text, f)]
+    relevant_confirmed = [f for f in confirmed if _claim_matches_fact(text, f)]
+
+    # 0a. Смысл отрицания: «ЦБ не запрещал наличные» — это правда, хотя
+    #     тема та же, что у фейка про запрет. Смотрим только те записи,
+    #     которые прямо называют действие (запрет, отмена, штраф):
+    #     сравнение знака по всему тексту даёт ложные срабатывания.
+    negated = _is_negated(text)
+    if negated:
+        for fact in relevant_refuted:
+            if _is_negated(str(fact.get("claim", ""))):
+                return (
+                    Verdict.supports_real,
+                    RELIABILITY_MATCH,
+                    f"Совпадает с базой: {fact['claim']}.",
+                    {
+                        "topic": topic["topic"],
+                        "matched_fact": fact,
+                        "reason": "matched_negation",
+                        "source": fact.get("source"),
+                        "url": fact.get("url"),
+                    },
+                )
+
+    if facts and not relevant_refuted and not relevant_confirmed:
+        return (
+            Verdict.neutral,
+            RELIABILITY_TOPIC,
+            f"Тема найдена ({topic['topic']}), но утверждение не про тот факт, "
+            f"что в базе — нужна ручная проверка.",
+            {"topic": topic["topic"], "reason": "different_fact"},
+        )
+    refuted = relevant_refuted
+    confirmed = relevant_confirmed
 
     # 1. Прямое опровержение: база говорит, что такого нет.
     if refuted:
@@ -229,6 +307,15 @@ class KbFactsSignal(BaseSignal):
                 {"reason": "topic_not_found", "topics_in_kb": len(kb.get("topics", []))},
             )
 
+        # Перебираем все задевающие темы: первая может не содержать нужного
+        # факта («пенсии» без «индексации»), а вторая — содержать.
         verdict, reliability, summary, details = check_against_topic(topic, text)
+        if details.get("reason") == "different_fact":
+            for other in find_topics(kb, text)[1:]:
+                alt = check_against_topic(other, text)
+                if alt[3].get("reason") != "different_fact":
+                    verdict, reliability, summary, details = alt
+                    break
+
         strength = reliability  # сила равна надёжности: совпадение — единственный довод
         return make_result(self, verdict, strength, reliability, summary, details)

@@ -7,7 +7,3 @@ export function plural(count: number, forms: [string, string, string]): string {
   if (last === 1) return forms[0];
   return forms[2];
 }
-
-export function evidenceCountLabel(count: number): string {
-  return `${count} ${plural(count, ['доказательство', 'доказательства', 'доказательств'])}`;
-}

@@ -80,7 +80,9 @@ def test_find_topic_matches_longest_keyword():
 
 def test_find_topic_returns_none_for_unknown():
     kb = load_kb()
-    assert find_topic(kb, "Сегодня хорошая погода в Москве") is None
+    # «погода» теперь есть в базе отдельной темой, поэтому берём то,
+    # чего там точно нет.
+    assert find_topic(kb, "Рецепт борща с пампушками на ужин") is None
 
 
 # ---------- вердикты ----------
@@ -109,6 +111,28 @@ def test_unknown_topic_is_unavailable_not_fake():
     result = run("Вчера в Казани открыли новый мост через реку")
     assert result.verdict == Verdict.unavailable
     assert result.details["reason"] == "topic_not_found"
+
+
+def test_negated_claim_matching_refutation_is_true():
+    """«ЦБ не запрещал наличные» — правда, хотя тема та же, что у фейка."""
+    result = run("ЦБ не запрещал наличные.")
+    assert result.verdict == Verdict.supports_real
+    assert result.details["reason"] == "matched_negation"
+
+
+def test_negation_does_not_break_plain_fakes():
+    """Отрицание не должно спасать фейки: «штраф 5000» остаётся фейком."""
+    result = run("С 1 января штраф за покупку алкоголя 5000 рублей!")
+    assert result.verdict == Verdict.supports_fake
+
+    result = run("Пенсионный возраст повысят до 70 лет!")
+    assert result.verdict == Verdict.supports_fake
+
+
+def test_multi_topic_message_checks_all_topics():
+    """Сообщение про две темы должно найти факт во второй."""
+    result = run("Индексация пенсий пройдёт с 1 июля, тарифы ЖКХ тоже вырастут.")
+    assert result.verdict == Verdict.supports_real
 
 
 def test_short_text_is_unavailable():

@@ -7,6 +7,3 @@ export const apiBaseUrl = (import.meta.env.VITE_API_URL ?? '').trim().replace(/\
 
 /** Лимит длины проверяемого текста — согласован с backend. */
 export const maxTextLength = 4000;
-
-/** Комиссия не нужна в этом продукте; оставлено для совместимости импортов. */
-export const commissionRate = 0;

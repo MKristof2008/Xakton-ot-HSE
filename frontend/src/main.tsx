@@ -10,7 +10,11 @@ if (!container) throw new Error('Не найден корневой элемен
 const params = new URLSearchParams(window.location.search);
 const preset = params.get('q');
 if (preset) {
-  sessionStorage.setItem('preset_text', preset);
+  try {
+    sessionStorage.setItem('preset_text', preset);
+  } catch {
+    /* приватный режим — проверка просто не запустится автоматически */
+  }
 }
 
 createRoot(container).render(

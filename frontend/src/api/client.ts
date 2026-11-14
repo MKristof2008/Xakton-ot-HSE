@@ -46,10 +46,6 @@ function writeToken(token: string): void {
   }
 }
 
-export function currentToken(): string | null {
-  return readToken();
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const token = readToken();

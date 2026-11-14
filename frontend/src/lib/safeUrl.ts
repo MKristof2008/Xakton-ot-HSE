@@ -10,8 +10,3 @@ export function safeHttpUrl(raw: string | null | undefined): string | null {
     return null;
   }
 }
-
-/** Короткое читаемое представление ссылки для подписи. */
-export function readableUrl(raw: string): string {
-  return raw.replace(/^https?:\/\//, '').replace(/\/$/, '');
-}

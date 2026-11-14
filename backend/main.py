@@ -1,4 +1,4 @@
-"""HTTP API «Проверено» — фактчекинг по замыслу эксперта NMH.
+"""HTTP API «Ревизор» — фактчекинг по замыслу эксперта NMH.
 
 Две ступени по подписке:
   free — вердикт и уровень доверия;
@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -28,23 +29,34 @@ BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(ML_DIR))
 sys.path.insert(0, str(BACKEND_DIR))
 
-env_path = ML_DIR / ".env"
-if env_path.exists():
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip())
+# .env ищется рядом с backend и в корне проекта: так удобнее и для
+# локального запуска, и для Docker.
+for candidate in (
+    Path(__file__).resolve().parent / ".env",
+    Path(__file__).resolve().parent.parent / ".env",
+    ML_DIR / ".env",
+):
+    if candidate.exists():
+        for line in candidate.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip())
 
 from lakmus.context import CheckContext  # noqa: E402
 from lakmus.pipeline import check as run_check  # noqa: E402
+from lakmus.full_pipeline import run_check as run_full_check  # noqa: E402
 from lakmus.schemas import CheckInput, InputType  # noqa: E402
+from lakmus.sources import fetch_page  # noqa: E402
 
 import store  # noqa: E402
+from passport import passport_html  # noqa: E402
+from quote_page import build_page as build_quote_page  # noqa: E402
+from sources_page import load_topics, page_html as sources_page_html  # noqa: E402
 
 MAX_TEXT = 4000
 
-app = FastAPI(title="Проверено — фактчекинг API")
+app = FastAPI(title="Ревизор — фактчекинг API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -105,6 +117,32 @@ def verdict_of(result: Any) -> str:
     if level in ("likely_fake", "doubtful"):
         return "фейк"
     return "непонятно"
+
+
+def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
+    """Ответ по тарифу из результата полного пайплайна."""
+    base: dict[str, Any] = {
+        "id": check_id,
+        "verdict": outcome.verdict,
+        "level": outcome.level,
+        "level_label": level_label(outcome.level),
+        "score": outcome.score,
+        "uncertainty": round(outcome.uncertainty, 4),
+        "plan": plan,
+        "mode": outcome.mode,
+    }
+    if plan != "pro":
+        base["upgrade_hint"] = (
+            "Разбор — почему такой вердикт, источники и что проверить дальше — "
+            "доступен по подписке."
+        )
+        return base
+
+    base["claims"] = [c.as_dict() for c in outcome.claims]
+    base["sources_used"] = outcome.sources_used
+    base["limits"] = outcome.limitations
+    base["duration_ms"] = outcome.duration_ms
+    return base
 
 
 def public_payload(result: Any, check_id: str, plan: str) -> dict[str, Any]:
@@ -191,26 +229,28 @@ async def check_text(
         )
 
     check_id = f"chk_{int(time.time() * 1000) % 10**10:010d}"
-    ctx = CheckContext(
-        check_id=check_id,
-        input=CheckInput(type=InputType.text, extracted_text=text),
-        text=text,
-    )
     try:
-        result = await run_check(ctx, llm=None)
+        # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
+        # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
+        outcome = await run_full_check(text)
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
 
-    payload = public_payload(result, check_id, plan)
+    payload = outcome_payload(outcome, check_id, plan)
+    # В базу всегда кладём полный разбор, независимо от тарифа: он нужен
+    # публичному паспорту и повторному открытию по подписке. Тариф
+    # ограничивает только ответ API, а не хранение.
     store.save_check(
         text=text,
         verdict=payload["verdict"],
-        score=result.trust.score,
-        uncertainty=result.trust.uncertainty,
-        level=result.trust.level.value,
-        full=payload,
+        score=outcome.score,
+        uncertainty=outcome.uncertainty,
+        level=outcome.level,
+        full=outcome_payload(outcome, check_id, "pro"),
         user_id=user["id"] if user else None,
     )
+    # Постоянная ссылка на паспорт: одна на утверждение, живёт после закрытия.
+    payload["passport"] = f"/p/{store.text_hash(text)}"
     if user:
         payload["quota_left"] = store.free_quota_left(user["id"]) if plan == "free" else None
     return payload
@@ -289,6 +329,130 @@ async def upgrade(
     if not store.upgrade_user(x_token or "", req.plan):
         return fail("BAD_INPUT", "неизвестный тариф", 422)
     return {"ok": True, "plan": req.plan}
+
+
+@app.get("/p/{hash_value}", response_class=HTMLResponse)
+async def passport(hash_value: str, request: Request) -> Any:
+    """Публичный «паспорт утверждения» — постоянная ссылка на проверку.
+
+    Отдаётся серверным HTML, чтобы Telegram и WhatsApp показывали превью
+    при пересылке. Вход не нужен: карточка должна открываться у любого.
+    """
+    if not re.fullmatch(r"[0-9a-f]{6,32}", hash_value or ""):
+        return fail("NOT_FOUND", "паспорт не найден", 404)
+
+    row = store.get_by_hash(hash_value)
+    if not row:
+        return fail("NOT_FOUND", "паспорт не найден", 404)
+
+    full = row.get("full") or {}
+    canonical = str(request.url).split("?")[0]
+    page = passport_html(
+        text=row["text"],
+        verdict=full.get("verdict", "непонятно"),
+        level=full.get("level", row.get("level", "fog")),
+        score=int(full.get("score", row.get("score", 50))),
+        claims=full.get("claims", []),
+        checks_count=int(row.get("checks_count", 1)),
+        checked_at=str(row.get("created_at", ""))[:10],
+        canonical_url=canonical,
+        hash_value=hash_value,
+    )
+    return HTMLResponse(page)
+
+
+def _has_quote_material(source_text: str, claim: dict[str, Any]) -> bool:
+    """Есть ли в тексте хоть какое-то пересечение с цитатой утверждения."""
+    quote = str(claim.get("quote", ""))
+    if not quote:
+        return True
+    words = {w for w in re.findall(r"[а-яa-z]{5,}", quote.lower().replace("ё", "е"))}
+    if not words:
+        return True
+    text = source_text.lower().replace("ё", "е")
+    return sum(1 for w in words if w in text) >= max(1, len(words) // 3)
+
+
+@app.get("/p/{hash_value}/quote/{claim_index}", response_class=HTMLResponse)
+async def quote_in_source(hash_value: str, claim_index: int, request: Request) -> Any:
+    """Где именно в источнике сказано то, на чём основан вердикт."""
+    if not re.fullmatch(r"[0-9a-f]{6,32}", hash_value or ""):
+        return fail("NOT_FOUND", "страница не найдена", 404)
+    row = store.get_by_hash(hash_value)
+    if not row:
+        return fail("NOT_FOUND", "проверка не найдена", 404)
+
+    full = row.get("full") or {}
+    claims = full.get("claims") or []
+    if claim_index < 0 or claim_index >= len(claims):
+        return fail("NOT_FOUND", "утверждение не найдено", 404)
+
+    claim = claims[claim_index]
+    quote = str(claim.get("quote", ""))
+    source_url = str(claim.get("source_url", ""))
+    source_title = str(claim.get("source_title", "")) or source_url
+
+    # Источник для показа: сначала пробуем скачать страницу первоисточника.
+    # Если там нет нужного места (частая история: ссылка ведёт на раздел,
+    # а не на конкретный документ), показываем запись базы фактов — это
+    # тоже реальный источник, просто локальный.
+    source_text = ""
+    if source_url:
+        source_text = fetch_page(source_url) or ""
+    # Запасной текст — запись базы фактов. Если скачанная страница не
+    # содержит нужного места, покажем её вместо свалки навигации.
+    fallback_text = (
+        str(claim.get("quote", "")) + ". " + str(claim.get("explanation", ""))
+    ).strip()
+    fallback_title = source_title or "База фактов"
+
+    canonical = str(request.url).split("?")[0]
+    page = build_quote_page(
+        claim_text=str(claim.get("text", "")),
+        quote=quote,
+        source_title=source_title,
+        source_url=source_url,
+        source_text=source_text,
+        fallback_text=fallback_text,
+        fallback_title=fallback_title,
+        verdict_label=level_label(str(full.get("level", "fog"))),
+        level=str(full.get("level", "fog")),
+        canonical_url=canonical,
+    )
+    return HTMLResponse(page)
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def sources(request: Request) -> Any:
+    """Открытая витрина базы фактов: что проверяем и по каким источникам."""
+    topics = load_topics()
+    canonical = str(request.url).split("?")[0]
+    return HTMLResponse(sources_page_html(topics, canonical))
+
+
+@app.get("/api/sources")
+async def sources_json() -> dict[str, Any]:
+    """Тот же список в JSON — для интерфейса и для проверки."""
+    topics = load_topics()
+    return {
+        "topics": len(topics),
+        "facts": sum(len(t.get("facts", [])) for t in topics),
+        "items": [
+            {
+                "topic": t.get("topic", ""),
+                "facts": [
+                    {
+                        "claim": f.get("claim", ""),
+                        "verdict": f.get("verdict", ""),
+                        "source": f.get("source", ""),
+                        "url": f.get("url", ""),
+                    }
+                    for f in t.get("facts", [])
+                ],
+            }
+            for t in topics
+        ],
+    }
 
 
 @app.get("/api/pricing")

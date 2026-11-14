@@ -172,6 +172,38 @@ def get_check(check_id: str) -> Optional[dict[str, Any]]:
     return data
 
 
+def get_by_hash(text_hash_value: str) -> Optional[dict[str, Any]]:
+    """Последняя проверка этого утверждения — основа «паспорта».
+
+    Паспорт один на утверждение, а не на каждую проверку: сколько бы раз
+    текст ни проверяли, ссылка ведёт на актуальный результат.
+    """
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM checks WHERE text_hash = ? ORDER BY created_at DESC LIMIT 1",
+            (text_hash_value,),
+        ).fetchone()
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM checks WHERE text_hash = ?",
+            (text_hash_value,),
+        ).fetchone()["n"]
+    if not row:
+        return None
+    data = dict(row)
+    data["full"] = json.loads(data.pop("full_json"))
+    data["checks_count"] = int(count)
+    return data
+
+
+def check_count_by_hash(text_hash_value: str) -> int:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM checks WHERE text_hash = ?",
+            (text_hash_value,),
+        ).fetchone()
+    return int(row["n"]) if row else 0
+
+
 # ---------- топы ----------
 
 def top_items(limit: int = 20, window_hours: int = 48) -> list[dict[str, Any]]:
@@ -179,10 +211,16 @@ def top_items(limit: int = 20, window_hours: int = 48) -> list[dict[str, Any]]:
 
     Считается по text_hash: одна и та же новость от ста человек — одна
     строка с счётчиком 100. Показываем и вердикт, и разброс мнений.
+
+    Плюс «живость»: сколько проверок за последний час и минуту. Это не
+    декорация — по этим числам видно, что утверждение сейчас на волне,
+    а не просто накопило счётчик за неделю.
     """
-    since = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - window_hours * 3600)
-    )
+    now = time.time()
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - window_hours * 3600))
+    hour_ago = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600))
+    minute_ago = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60))
+
     with connect() as conn:
         rows = conn.execute(
             """
@@ -190,6 +228,8 @@ def top_items(limit: int = 20, window_hours: int = 48) -> list[dict[str, Any]]:
                    MIN(text)                         AS sample_text,
                    COUNT(*)                          AS checks_count,
                    MAX(created_at)                   AS last_at,
+                   SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS last_hour,
+                   SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS last_minute,
                    (SELECT verdict FROM checks c2
                      WHERE c2.text_hash = c.text_hash
                      ORDER BY created_at DESC LIMIT 1) AS verdict,
@@ -203,16 +243,18 @@ def top_items(limit: int = 20, window_hours: int = 48) -> list[dict[str, Any]]:
               FROM checks c
              WHERE created_at >= ?
              GROUP BY text_hash
-             ORDER BY checks_count DESC, last_at DESC
+             ORDER BY last_hour DESC, checks_count DESC, last_at DESC
              LIMIT ?
             """,
-            (since, int(limit)),
+            (hour_ago, minute_ago, since, int(limit)),
         ).fetchall()
         pinned = {r["text_hash"] for r in conn.execute("SELECT text_hash FROM top_pins")}
     out = []
     for row in rows:
         item = dict(row)
         item["pinned"] = item["text_hash"] in pinned
+        item["last_hour"] = int(item.get("last_hour") or 0)
+        item["last_minute"] = int(item.get("last_minute") or 0)
         out.append(item)
     return out
 

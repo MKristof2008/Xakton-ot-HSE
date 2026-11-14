@@ -1,4 +1,4 @@
-/** Типы ответов API «Проверено». Отражают backend/main.py один в один. */
+/** Типы ответов API «Ревизор». Отражают backend/main.py один в один. */
 
 export type Level = 'confirmed' | 'likely_real' | 'fog' | 'doubtful' | 'likely_fake';
 
@@ -51,6 +51,22 @@ export interface CheckResponse {
   next_steps?: NextStep[];
   limits?: string[];
   duration_ms?: number;
+  /** Постоянная ссылка на публичный паспорт утверждения. */
+  passport?: string;
+  /** Разобранные утверждения — только в pro-тарифе. */
+  claims?: ClaimFinding[];
+  sources_used?: number;
+}
+
+export interface ClaimFinding {
+  text: string;
+  status: 'supported' | 'contradicted' | 'context' | 'insufficient';
+  explanation: string;
+  quote: string;
+  source_title: string;
+  source_url: string;
+  trusted: boolean;
+  limitations: string[];
 }
 
 export interface TopItem {
@@ -64,6 +80,9 @@ export interface TopItem {
   level_label: string;
   verdict_variants: number;
   pinned: boolean;
+  /** Сколько проверок за последний час и минуту — «живость» новости. */
+  last_hour?: number;
+  last_minute?: number;
 }
 
 export interface TopResponse {
