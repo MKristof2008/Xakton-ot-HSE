@@ -34,9 +34,13 @@ async def test_pipeline_image_returns_check_result():
     assert result.input.type == InputType.image
     # Картинку проверяют сигналы изображения, а не текстовые: раньше
     # InputType.image превращался в строку «InputType.image», и набор
-    # сигналов молча откатывался к текстовому.
+    # сигналов молча откатывался к текстовому. Теперь к набору добавились
+    # uniqueness и pricing (проверка дубликатов и цен) — проверяем, что
+    # текстовых сигналов по-прежнему нет.
     ids = {s.id for s in result.signals}
-    assert ids == {"metadata", "ai_artifacts", "manipulation", "source_search", "screenshot"}
+    assert {
+        "metadata", "ai_artifacts", "manipulation", "source_search", "screenshot",
+    } <= ids
     assert not ids & {"claims", "kb_facts", "quotes"}
     assert result.trust.uncertainty >= 0
 
@@ -48,8 +52,13 @@ def test_default_signals_respects_input_type_enum():
     text = {type(s).__name__ for s in default_signals(InputType.text)}
     url = {type(s).__name__ for s in default_signals(InputType.url)}
 
-    assert image == {"MetadataSignal", "AIArtifactsSignal", "ManipulationSignal",
-                     "SourceSearchSignal", "ScreenshotSignal"}
+    # Набор изображения: базовые сигналы плюс uniqueness (дубликаты)
+    # и pricing (цены на картинке), добавленные позже.
+    assert image == {
+        "MetadataSignal", "AIArtifactsSignal", "ManipulationSignal",
+        "SourceSearchSignal", "ScreenshotSignal",
+        "UniquenessSignal", "PricingSignal",
+    }
     assert text == {"ClaimsSignal", "KbFactsSignal", "SourcesSignal", "QuotesSignal",
                     "RhetoricSignal", "MachineTextSignal"}
     # Строка вместо enum тоже должна работать — backend может передать её.

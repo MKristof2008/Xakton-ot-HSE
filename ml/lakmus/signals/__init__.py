@@ -25,6 +25,8 @@ from .text_claims import ClaimsSignal
 from .text_sources import SourcesSignal
 from .machine_text import MachineTextSignal
 from .video import VideoSignal
+from .uniqueness import UniquenessSignal
+from .pricing import PricingSignal
 
 SIGNALS: dict[str, list[type]] = {
     "image": [
@@ -33,6 +35,8 @@ SIGNALS: dict[str, list[type]] = {
         ManipulationSignal,
         SourceSearchSignal,
         ScreenshotSignal,
+        UniquenessSignal,
+        PricingSignal,
     ],
     "text": [
         ClaimsSignal,

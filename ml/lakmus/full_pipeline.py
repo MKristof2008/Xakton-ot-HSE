@@ -364,6 +364,19 @@ def _judge_by_overlap(claim: str, sources: Sequence[FetchedSource]) -> ClaimFind
     claim_numbers = _content_numbers(claim)
     claim_negated = _is_negated(claim)
     claim_words = {w for w in re.findall(r"[а-яa-z]{5,}", _norm(claim))}
+    # Одно-два слова — не утверждение, а тема. «Путин показал» подходит
+    # к любой новости про Путина, поэтому совпадение по ним ничего не
+    # доказывает. Такие запросы уходят в «недостаточно данных».
+    if len(claim_words) <= 2 and not claim_numbers:
+        return ClaimFinding(
+            text=claim,
+            status="insufficient",
+            explanation=(
+                "Слишком короткое утверждение: одних этих слов "
+                "недостаточно, чтобы подтвердить событие."
+            ),
+            limitations=["Нужны подробности: что, где и когда."],
+        )
 
     best: Optional[ClaimFinding] = None
     for source in sources:
@@ -407,17 +420,22 @@ def _judge_by_overlap(claim: str, sources: Sequence[FetchedSource]) -> ClaimFind
                 trusted=trusted,
             )
         else:
+            # Пересечение слов — не доказательство. «Путин показал кулак»
+            # и «Путин показал пенис» имеют общие слова, но это разные
+            # события. Подтверждение возможно только с дословной цитатой,
+            # поэтому здесь его не ставим вовсе.
             finding = ClaimFinding(
                 text=claim,
-                status="supported",
-                explanation=f"Совпадает с источником: {source.title}.",
+                status="insufficient",
+                explanation=(
+                    f"В источнике «{source.title}» нет подтверждения: "
+                    "событие не совпадает."
+                ),
                 quote="",
                 source_title=source.title,
                 source_url=source.url,
                 trusted=trusted,
             )
-        if finding.status == "supported" and trusted:
-            return finding
         if best is None:
             best = finding
 
@@ -873,7 +891,10 @@ async def run_check(
                      if _quote_in_source(finding.quote, s.content)),
                     None,
                 )
-                if source is not None:
+                # Цитата без привязки к статусу вводит в заблуждение:
+                # в карточке появляется фраза, которая ничего не доказывает.
+                # Оставляем её только при осмысленном вердикте.
+                if source is not None and finding.status in ("contradicted", "context"):
                     finding.source_title = source.title
                     finding.source_url = source.url
                     finding.trusted = is_trusted(source.url)

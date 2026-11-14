@@ -331,6 +331,100 @@ async def health() -> dict[str, Any]:
     }
 
 
+@app.post("/api/check-media")
+async def check_media(
+    file: UploadFile = File(...),
+    caption: str = Form(default=""),
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Проверить изображение: метаданные, следы генерации, монтаж, дубликаты.
+
+    Только изображения. Видео пока не поддерживается — честно говорим об
+    этом, а не делаем вид, что проверили.
+    """
+    user = resolve_user(x_token)
+    if user is None:
+        return fail("UNAUTHORIZED", "нужно войти или зарегистрироваться", 401)
+
+    mime = (file.content_type or "").lower()
+    if mime.startswith("video/"):
+        return fail(
+            "UNSUPPORTED_TYPE",
+            "Видео пока не проверяем: поддерживаются изображения PNG, JPEG, WebP",
+            415,
+        )
+    if mime not in ("image/jpeg", "image/png", "image/webp"):
+        return fail("UNSUPPORTED_TYPE", "подойдёт PNG, JPEG или WebP", 415)
+
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        return fail("TOO_LARGE", "файл больше 15 МБ", 413)
+    if not data:
+        return fail("BAD_INPUT", "пустой файл", 422)
+
+    # Проверяем настоящий формат, а не только заявленный MIME.
+    try:
+        from PIL import Image
+        import io as _io
+
+        with Image.open(_io.BytesIO(data)) as probe:
+            probe.verify()
+    except Exception:
+        return fail("BAD_INPUT", "файл не открывается как изображение", 415)
+
+    plan = user["plan"]
+    if plan == "free" and store.free_quota_left(user["id"]) <= 0:
+        return fail(
+            "QUOTA_EXCEEDED",
+            "бесплатные проверки на сегодня закончились. Подписка снимает лимит.",
+            429,
+        )
+
+    check_id = f"med_{int(time.time() * 1000) % 10**10:010d}"
+    ctx = CheckContext(
+        check_id=check_id,
+        input=CheckInput(type=InputType.image),
+        data=data,
+        text=(caption or "").strip(),
+    )
+    try:
+        result = await run_check(ctx, llm=None)
+    except Exception as exc:
+        return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
+
+    payload = {
+        "id": check_id,
+        "kind": "image",
+        "captcha": None,
+        "trust": {
+            "score": result.trust.score,
+            "uncertainty": round(result.trust.uncertainty, 4),
+            "coverage": round(result.trust.coverage, 4),
+            "level": result.trust.level.value,
+            "level_label": level_label(result.trust.level.value),
+            "conflict": result.trust.conflict,
+        },
+        "signals": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "stage": s.stage.value,
+                "verdict": s.verdict.value,
+                "strength": round(s.strength, 3),
+                "reliability": round(s.reliability, 3),
+                "summary": s.summary,
+                "details": s.details,
+            }
+            for s in result.signals
+        ],
+        "limits": result.limits,
+        "duration_ms": result.duration_ms,
+        "plan": plan,
+    }
+    payload["quota_left"] = store.free_quota_left(user["id"]) if plan == "free" else None
+    return payload
+
+
 @app.post("/api/check")
 async def check_text(
     request: Request,
