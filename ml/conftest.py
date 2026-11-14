@@ -2,7 +2,11 @@ import asyncio
 import inspect
 import sys
 
-sys.path.insert(0, ".")
+import pathlib as _pathlib
+
+_HERE = _pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(_HERE.parent))
 
 
 def pytest_pyfunc_call(pyfuncitem):

@@ -104,6 +104,28 @@ _NEGATIONS = ("не ", "нет ", "никогда", "не будет", "не п�
 #: Противопоставление внутри одного утверждения: «запретил, но отменил».
 _CONTRAST = re.compile(r"\b(но|однако|зато|хотя|впрочем)\b", re.I)
 
+#: Признаки будущего: прогноз, обещание, ожидание. Такое нельзя назвать
+#: ложью — событие ещё не наступило.
+_FUTURE = re.compile(
+    r"\b(завтра|послезавтра|ожидается|ожидают|прогноз|объявят|"
+    r"планируют|планируется|собираются|в следующем году|со следующей недели|"
+    r"скоро|в ближайшее время)\b",
+    re.I,
+)
+
+
+#: Безымянные заглушки: утверждение о «компании X» проверить нельзя.
+_VAGUE = re.compile(r"(компания [a-zх]|некая компания|некий|некие|"
+                    r"один человек|какой-то)", re.I)
+
+
+def _is_vague(text: str) -> bool:
+    return bool(_VAGUE.search(text or ""))
+
+
+def _is_future(text: str) -> bool:
+    return bool(_FUTURE.search(text or ""))
+
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").lower().replace("ё", "е")).strip()
@@ -540,6 +562,7 @@ async def run_check(
     # 3. Оценка
     findings: list[ClaimFinding] = []
     model_silent = False
+    future_text = _is_future(text)
 
     async def assess(claim: str) -> tuple[ClaimFinding, bool]:
         """Одно утверждение: база → источники → модель. Возвращает находку и
@@ -564,22 +587,58 @@ async def run_check(
             finding.quote = answer["quote"]
             # «Нет события в источниках» — это не опровержение. Опровергает
             # только прямая противоположность, её ставит модель сама.
-            if finding.quote:
+            # Подтверждение обязано опираться на дословную цитату.
+            # «В источниках что-то похожее есть» — не доказательство:
+            # модель подтверждала и «воду на Марсе», и «доллар по 120».
+            if finding.status == "supported":
+                # Подтверждение без цитаты — не подтверждение. Модель
+                # умеет «согласиться» с абсурдом, если в выдаче есть
+                # что-то похожее по словам.
                 source = next(
-                    (s for s in sources if _quote_in_source(finding.quote, s.content)),
+                    (s for s in sources
+                     if finding.quote and _quote_in_source(finding.quote, s.content)),
                     None,
                 )
                 if source is None:
-                    finding.limitations.append(
-                        "Цитата модели не найдена в источнике — вердикт понижен."
-                    )
                     finding.status = "insufficient"
+                    finding.explanation = (
+                        "Подтверждения в источниках нет: дословной цитаты не нашлось."
+                    )
                     finding.quote = ""
                 else:
                     finding.source_title = source.title
                     finding.source_url = source.url
                     finding.trusted = is_trusted(source.url)
+            elif finding.quote:
+                source = next(
+                    (s for s in sources if _quote_in_source(finding.quote, s.content)),
+                    None,
+                )
+                if source is not None:
+                    finding.source_title = source.title
+                    finding.source_url = source.url
+                    finding.trusted = is_trusted(source.url)
+                else:
+                    finding.quote = ""
         return finding, False
+
+    # Прогноз или обещание не может быть ложью: событие ещё не наступило.
+    # «Завтра ожидается снег» — не фейк, даже если прогноз не сбудется.
+    # Безымянное утверждение не проверить: «компания X купила компанию Y».
+    if _is_vague(text):
+        for finding in findings:
+            finding.status = "insufficient"
+            finding.explanation = (
+                "В утверждении нет конкретных имён и чисел: проверить нечего."
+            )
+
+    if future_text:
+        for finding in findings:
+            if finding.status == "contradicted":
+                finding.status = "insufficient"
+                finding.explanation = (
+                    "Это прогноз о будущем: проверить его сейчас нельзя."
+                )
 
     # Утверждения оцениваются параллельно: три запроса к модели идут
     # одновременно, а не друг за другом.

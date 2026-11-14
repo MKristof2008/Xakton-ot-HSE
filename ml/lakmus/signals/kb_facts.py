@@ -256,6 +256,21 @@ def check_against_topic(topic: dict[str, Any], text: str) -> tuple[Verdict, floa
                 },
             )
 
+        # Чисел в утверждении нет — сверять нечего, но факт тот же.
+        if not claim_numbers and not claim_years:
+            return (
+                Verdict.supports_real,
+                RELIABILITY_MATCH,
+                f"Совпадает с базой: {fact['claim']}.",
+                {
+                    "topic": topic["topic"],
+                    "matched_fact": fact,
+                    "reason": "matched",
+                    "source": fact.get("source"),
+                    "url": fact.get("url"),
+                },
+            )
+
         return (
             Verdict.neutral,
             RELIABILITY_TOPIC,
