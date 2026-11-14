@@ -570,7 +570,9 @@ async def run_check(
     # Интернет подключаем только если есть ключ поиска и тема не покрыта
     # базой: на известных фактах лишние запросы стоят времени и денег.
     serper = SerperProvider()
-    if serper.enabled and _judge_with_kb(text) is None:
+    # Результат kb_direct уже посчитан выше — второй прогон по базе ничего
+    # не меняет, а стоит миллисекунды на каждой проверке.
+    if serper.enabled and kb_direct is None:
         providers.append(serper)
 
     # Провайдеры опрашиваются ПАРАЛЛЕЛЬНО. Раньше они шли по очереди, и

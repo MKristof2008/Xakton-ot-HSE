@@ -67,14 +67,18 @@ export function HistoryScreen() {
               className="top-item top-item--link"
               style={{ '--i': i } as CSSProperties}
             >
-              <a className="top-item__anchor" href={item.passport} target="_blank" rel="noreferrer">
+              <a
+                className="top-item__anchor"
+                href={item.passport}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
                 <p className="top-item__text">{item.text}</p>
                 <div className="top-item__meta">
                   <span className={`tag tag--${toneForLevel(item.level)}`}>
                     {item.level_label}
                   </span>
                   <span>{formatWhen(item.created_at)}</span>
-                  {item.plan_note && <span>{item.plan_note}</span>}
                 </div>
               </a>
             </li>

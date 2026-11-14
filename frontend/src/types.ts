@@ -96,7 +96,6 @@ export interface HistoryItem {
   text_hash: string;
   created_at: string;
   passport: string;
-  plan_note?: string;
 }
 
 export interface TopResponse {

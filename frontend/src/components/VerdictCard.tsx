@@ -23,6 +23,8 @@ interface Props {
 
 export function VerdictCard({ result, onUpgraded }: Props) {
   const tone = toneForLevel(result.level);
+  // Хук вызывается всегда — правила хуков не позволяют звать его под
+  // условием, а на free-тарифе число скрыто.
   const score = useCountUp(result.score, 1000);
   const uncertainty = uncertaintyPercent(result.uncertainty);
 

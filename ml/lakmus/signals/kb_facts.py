@@ -38,15 +38,31 @@ class KbError(RuntimeError):
     """База не читается — сигнал вернёт unavailable."""
 
 
+#: Кэш разобранной базы: (mtime, размер) -> данные.
+#: База весит 480 КБ и парсится заново на каждый вызов, а вызывается она
+#: 3-4 раза за проверку. Читаем один раз и перечитываем только если файл
+#: изменился — правка базы на диске по-прежнему подхватывается.
+_KB_CACHE: dict[tuple[float, int], dict[str, Any]] = {}
+
+
 def load_kb(path: Any = None) -> dict[str, Any]:
     """Читает базу фактов. Бросает KbError с понятной причиной."""
     target = pathlib.Path(path) if path else KB_PATH
     if not target.is_file():
         raise KbError(f"база фактов не найдена: {target}")
     try:
-        return json.loads(target.read_text(encoding="utf-8"))
+        stat = target.stat()
+        key = (stat.st_mtime, stat.st_size)
+        cached = _KB_CACHE.get(key)
+        if cached is not None:
+            return cached
+        data = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise KbError(f"база фактов не читается: {type(exc).__name__}") from exc
+    # Держим только актуальную версию: база одна.
+    _KB_CACHE.clear()
+    _KB_CACHE[key] = data
+    return data
 
 
 def _norm(text: str) -> str:
@@ -115,29 +131,41 @@ _RU_ENDINGS = (
 )
 
 
+#: Кэш основ: слов в базе немного и они повторяются из проверки в проверку.
+#: Без него стем считался 2190 раз за один вызов (перебор 31 окончания дважды).
+_STEM_CACHE: dict[str, str] = {}
+
+
 def _stem(word: str) -> str:
     """Грубая основа слова: срезаем до 2 окончаний подряд.
 
     Настоящей морфологии здесь нет и не нужно: цель — чтобы «мобилизацию»
     и «мобилизация» дали одну основу. Слишком короткие слова не трогаем.
     """
+    cached = _STEM_CACHE.get(word)
+    if cached is not None:
+        return cached
     w = _norm(word)
-    if len(w) <= 4:
-        return w
-    for _ in range(2):
-        for end in _RU_ENDINGS:
-            if len(w) - len(end) >= 4 and w.endswith(end):
-                w = w[: -len(end)]
-                break
+    if len(w) > 4:
+        for _ in range(2):
+            for end in _RU_ENDINGS:
+                if len(w) - len(end) >= 4 and w.endswith(end):
+                    w = w[: -len(end)]
+                    break
+    if len(_STEM_CACHE) < 20_000:  # страховка от роста без границ
+        _STEM_CACHE[word] = w
     return w
 
 
+_WORD_RE = re.compile(r"[а-яa-z0-9]+")
+
+
 def _stems_in(text: str) -> set[str]:
-    return {_stem(w) for w in re.findall(r"[а-яa-z0-9]+", _norm(text)) if len(w) >= 4}
+    return {_stem(w) for w in _WORD_RE.findall(_norm(text)) if len(w) >= 4}
 
 
 def _words_in(text: str) -> set[str]:
-    return set(re.findall(r"[а-яa-z0-9]+", _norm(text)))
+    return set(_WORD_RE.findall(_norm(text)))
 
 
 def _keyword_matches(keyword: str, text: str, text_stems: set[str], text_words: set[str]) -> bool:
@@ -147,7 +175,7 @@ def _keyword_matches(keyword: str, text: str, text_stems: set[str], text_words: 
     Раньше ключ «ставка цб» сводился к одной основе «ставк», и фраза
     «ставка выросла» находила тему ЦБ, хотя ЦБ в ней нет.
     """
-    words = re.findall(r"[а-яa-z0-9]+", _norm(keyword))
+    words = _WORD_RE.findall(_norm(keyword))
     if not words:
         return False
     for w in words:
