@@ -205,6 +205,60 @@ def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
     return base
 
 
+def media_payload(
+    result: Any, check_id: str, plan: str, kind: str
+) -> dict[str, Any]:
+    """Ответ по фото и видео: правила вывода + чек-лист проверки.
+
+    Медиа проверяется не источниками, а отчётом детекторов. Поэтому здесь
+    тот же принцип, что у текста: вердикт собирается по явным правилам
+    (``verdict_rules``), а не берётся из «мнения» модели. Модель только
+    объясняет отчёт детекторов словами.
+    """
+    from lakmus import playbook, verdict_rules
+
+    base = public_payload(result, check_id, plan)
+    rules = verdict_rules.rules_for_media(result.signals)
+
+    # Тема для медиа — тип материала: фото или видео.
+    base["tag"] = {
+        "key": kind,
+        "title": "Фото и изображение" if kind == "image" else "Видео",
+        "hits": [],
+        "risk": 2,
+    }
+    # Чек-лист виден всем: он объясняет, что вообще проверялось.
+    base["playbook"] = playbook.for_material(kind).as_dict()
+
+    if plan not in ("pro", "team"):
+        return base
+
+    base["verdict_rules"] = rules.as_dict()
+    base["reasoning"] = {
+        "confidence": rules.confidence,
+        "verdict": rules.verdict,
+        "summary": rules.summary,
+        "tag": {"key": kind, "title": base["tag"]["title"]},
+        "rules_applied": [h.reason for h in rules.hits],
+        "criteria": [
+            {
+                "key": h.key,
+                "title": h.title,
+                "points": round(h.weight * 100),
+                "max_points": 100,
+                "reason": h.reason,
+                "tone": (
+                    "bad" if h.direction == "fake"
+                    else "ok" if h.direction == "real"
+                    else "warn"
+                ),
+            }
+            for h in rules.hits
+        ],
+    }
+    return base
+
+
 def public_payload(result: Any, check_id: str, plan: str) -> dict[str, Any]:
     """Собирает ответ по тарифу. Free не видит разбор — только вердикт."""
     base: dict[str, Any] = {
@@ -392,7 +446,7 @@ async def check_text(
                 text=text,
             )
             result = await run_check(ctx)
-            payload = public_payload(result, check_id, plan)
+            payload = media_payload(result, check_id, plan, "video" if video else "image")
             kind_label = "видео" if video else "изображение"
             subject = text or f"[{kind_label}] {video_name or image_name}"
 
@@ -555,11 +609,68 @@ async def create_feedback(
         note=req.note,
         user_id=user["id"] if user else None,
     )
+
+    # Ошибка человека — это правило, а не просто запись в журнале.
+    # Если он сказал «должно быть фейк/правда», знание уходит в банк с
+    # origin=human: следующий такой же текст получит верный ответ сразу,
+    # и модель не сможет перетереть эту правку.
+    learned = False
+    if not req.verdict_ok and req.expected in ("правда", "фейк"):
+        learned = _learn_from_feedback(row, req.expected, req.note or "")
+
     return {
         "id": feedback_id,
         "ok": True,
-        "note": "Спасибо — это попадёт в разбор ошибок.",
+        "learned": learned,
+        "note": (
+            "Спасибо — поправка записана в банк знаний, следующая такая "
+            "проверка ответит верно."
+            if learned else
+            "Спасибо — это попадёт в разбор ошибок."
+        ),
     }
+
+
+def _learn_from_feedback(row: Any, expected: str, note: str) -> bool:
+    """Записать поправку человека в банк знаний.
+
+    Учимся только тому, что можно проверить: у проверки должен быть
+    источник. Без него поправка останется в журнале обратной связи, но в
+    банк не пойдёт — иначе банк наполнится неподтверждёнными мнениями.
+    """
+    try:
+        from lakmus import bank as bank_module
+        from lakmus import tags as tag_module
+
+        full = row["full"] or {}
+        claims = full.get("claims") or []
+        # Берём основание из первого утверждения: цитата и ссылка оттуда.
+        first = claims[0] if claims else {}
+        source_url = str(first.get("source_url") or "")
+        if not source_url:
+            return False
+
+        text = str(row["text"] or "")
+        tag_match = tag_module.classify(text)
+        status = "supported" if expected == "правда" else "contradicted"
+        bank = bank_module.shared()
+        entry = bank.learn(
+            text,
+            status,
+            tag=tag_match.tag.key,
+            explanation=(note or "Поправка редакции: вердикт должен быть другим.")[:800],
+            quote=str(first.get("quote") or ""),
+            source_title=str(first.get("source_title") or ""),
+            source_url=source_url,
+            origin="human",
+        )
+        if entry is None:
+            return False
+        bank.save()
+        return True
+    except Exception:
+        # Банк не критичен: проверка продолжает работать и без него.
+        return False
 
 
 @app.get("/api/feedback/stats")

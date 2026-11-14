@@ -829,7 +829,9 @@ async def run_check(
         finding = ClaimFinding(text=claim, status="insufficient",
                                explanation="В доступных источниках нет подтверждения.")
         if llm_used and evaluate_one_with_llm is not None:
-            answer = await evaluate_one_with_llm(claim, evidence_sources, tier)
+            answer = await evaluate_one_with_llm(
+                claim, evidence_sources, tier, tag_key=tag_match.tag.key
+            )
             if answer is None:
                 return _judge_by_overlap(claim, sources), True
             finding.status = answer["status"]

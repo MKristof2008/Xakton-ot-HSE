@@ -21,6 +21,7 @@ import urllib.request
 from typing import Any, Optional, Sequence
 
 from .sources import FetchedSource
+from . import playbook
 from .tariffs import BASE, MAX, PLUS, Tier
 
 #: Сколько символов источника отдаём модели. Меньше — быстрее и дешевле.
@@ -281,6 +282,7 @@ async def evaluate_one_with_llm(
     claim: str,
     sources: Sequence[FetchedSource],
     tier: Optional[Tier] = None,
+    tag_key: str = "",
 ) -> Optional[dict[str, Any]]:
     """Оценить ОДНО утверждение. Один вызов — один вердикт.
 
@@ -293,6 +295,10 @@ async def evaluate_one_with_llm(
     (абсурдность, срочность, отсутствие атрибуции). «supported» без
     источника не принимается: подтверждать нечем.
 
+    ``tag_key`` — тема утверждения. По ней подбирается плейбук: у экономики
+    и медицины разные признаки лжи, и модель проверяет по своему чек-листу,
+    а не «вообще».
+
     **Вердикт не зависит от тарифа.** Сначала он считается одним и тем же
     промптом и той же моделью для всех уровней — иначе «Плюс» и «Макс»
     получали бы другой ответ на тот же вопрос, а это уже не тариф, а
@@ -304,10 +310,13 @@ async def evaluate_one_with_llm(
         f"[{s.id}] {s.title}\n{s.content[:BASE.source_chars]}"
         for s in sources[:2]
     )
+    # Чек-лист под тему: что искать, что считается доказательством.
+    plan = playbook.for_material("text", tag_key)
+    checklist = plan.as_prompt()
 
     if blocks:
         user = f"УТВЕРЖДЕНИЕ: {claim[:500]}\n\nИСТОЧНИК:\n{blocks}"
-        system = EVALUATE_SYSTEM
+        system = EVALUATE_SYSTEM + "\n\n" + checklist
     else:
         user = (
             f"УТВЕРЖДЕНИЕ: {claim[:500]}\n\n"
@@ -315,7 +324,7 @@ async def evaluate_one_with_llm(
             "абсурдность, категоричность, срочность, отсутствие атрибуции. "
             'Верни insufficient, если признаков лжи нет. "supported" без источника запрещён.'
         )
-        system = EVALUATE_NO_SOURCES_SYSTEM
+        system = EVALUATE_NO_SOURCES_SYSTEM + "\n\n" + checklist
 
     # Вердикт считается один раз на утверждение+источники и запоминается.
     # Модель недетерминирована даже при temperature=0 — без кэша «База» и
@@ -538,8 +547,17 @@ async def explain_media(
     if not (api_key and base_url and model):
         return None
 
+    # Чек-лист под фото или видео: что именно проверяем и что не считается
+    # доказательством. Без него модель смешивала признаки скриншота и ролика.
+    media_kind = "video" if "видео" in (kind or "").lower() else "image"
+    plan = playbook.for_material(media_kind)
+
     user = _media_summary(signals, caption, kind)
-    raw = await _post(MEDIA_SYSTEM + _depth_suffix(tier), user, tier=tier)
+    raw = await _post(
+        MEDIA_SYSTEM + "\n\n" + plan.as_prompt() + _depth_suffix(tier),
+        user,
+        tier=tier,
+    )
     if not raw:
         return None
 
