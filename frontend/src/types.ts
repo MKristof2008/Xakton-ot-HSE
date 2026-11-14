@@ -71,6 +71,10 @@ export interface ClaimFinding {
   source_url: string;
   trusted: boolean;
   limitations: string[];
+  /** Что делать дальше — с тарифа «Плюс». */
+  action?: string;
+  /** Готовая фраза для пересылки — только на «Максе». */
+  resend?: string;
 }
 
 export interface TopItem {

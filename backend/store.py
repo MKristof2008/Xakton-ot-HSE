@@ -50,8 +50,6 @@ CREATE TABLE IF NOT EXISTS users (
     pass_hash   TEXT,
     name        TEXT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)
-    WHERE email IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS payments (
     id            TEXT PRIMARY KEY,
@@ -105,6 +103,45 @@ CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
 FREE_CHECKS_PER_DAY = 10
 
 
+#: Колонки, добавленные после первого релиза. CREATE TABLE IF NOT EXISTS
+#: не расширяет уже созданную таблицу, поэтому старые базы (например, у
+#: того, кто обновил проект) падали на «no such column: email».
+_MIGRATIONS: dict[str, dict[str, str]] = {
+    "users": {
+        "email": "TEXT",
+        "pass_hash": "TEXT",
+        "name": "TEXT",
+        "expires_at": "TEXT",
+    },
+    "checks": {
+        "user_id": "TEXT",
+    },
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Добавить колонки, которых нет в старой базе. Безопасно к повтору."""
+    for table, columns in _MIGRATIONS.items():
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if not existing:
+            continue  # таблицы ещё нет — её создаст SCHEMA
+        for name, sql_type in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+    # Уникальный индекс по email создаём только после миграции: на старой
+    # таблице без этой колонки SCHEMA падала ещё до первой строки.
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"
+            " WHERE email IS NOT NULL"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+
 def db_path() -> Path:
     return Path(os.environ.get("VERDICT_DB") or DEFAULT_DB)
 
@@ -117,6 +154,9 @@ def connect() -> Iterator[sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     try:
         conn.executescript(SCHEMA)
+        # Порядок важен: SCHEMA создаёт таблицы, потом добираем колонки,
+        # которых не было в старой базе (например, email у пользователей).
+        _migrate(conn)
         yield conn
         conn.commit()
     finally:

@@ -49,6 +49,7 @@ from lakmus.full_pipeline import run_check as run_full_check  # noqa: E402
 from lakmus.schemas import CheckInput, InputType  # noqa: E402
 from lakmus.sources import fetch_page  # noqa: E402
 from lakmus.llm_pipeline import explain_media  # noqa: E402
+from lakmus.tariffs import for_plan  # noqa: E402
 
 import store  # noqa: E402
 from passport import passport_html  # noqa: E402
@@ -376,11 +377,16 @@ async def check_text(
             # Детекторы решают, что нашли; модель объясняет, что это значит.
             # Без ключа шаг просто пропускается — вердикт остаётся прежним.
             media_note = await explain_media(
-                result.signals, caption=text, kind=kind_label
+                result.signals,
+                caption=text,
+                kind=kind_label,
+                tier=for_plan(plan),
             )
             if media_note:
                 payload["explanation"] = media_note["explanation"]
                 payload["explanation_source"] = "model"
+                if media_note.get("action"):
+                    payload["action"] = media_note["action"]
                 if plan in ("pro", "team"):
                     payload["model_verdict"] = media_note["verdict"]
             else:
@@ -399,7 +405,9 @@ async def check_text(
         else:
             # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
             # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
-            outcome = await run_full_check(text, url=_clean_url(url))
+            outcome = await run_full_check(
+                text, url=_clean_url(url), tier=for_plan(plan)
+            )
             payload = outcome_payload(outcome, check_id, plan)
             subject = text or (url or "")
             # В базу всегда кладём полный разбор, независимо от тарифа: он нужен

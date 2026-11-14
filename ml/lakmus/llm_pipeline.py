@@ -21,6 +21,7 @@ import urllib.request
 from typing import Any, Optional, Sequence
 
 from .sources import FetchedSource
+from .tariffs import BASE, MAX, PLUS, Tier
 
 #: Сколько символов источника отдаём модели. Меньше — быстрее и дешевле.
 SOURCE_SNIPPET_CHARS = 1200
@@ -28,6 +29,22 @@ SOURCE_SNIPPET_CHARS = 1200
 MESSAGE_CHARS = 1500
 #: Таймаут одного вызова, секунды.
 CALL_TIMEOUT = 12
+
+#: Кэш вердиктов: один и тот же текст с теми же источниками даёт тот же
+#: вердикт на всех тарифах. Модель недетерминирована even при temperature=0,
+#: поэтому без кэша «База» и «Плюс» отвечали по-разному на один вопрос.
+#: Ключ намеренно не содержит тариф: вердикт — общий, разбор — разный.
+_VERDICT_CACHE: dict[str, dict[str, Any]] = {}
+_VERDICT_CACHE_MAX = 500
+
+
+def _verdict_key(claim: str, sources: Sequence[FetchedSource]) -> str:
+    import hashlib
+
+    parts = [" ".join((claim or "").lower().split())]
+    for source in sources[:2]:
+        parts.append(f"{source.id}|{source.url}")
+    return hashlib.sha256("||".join(parts).encode()).hexdigest()
 
 EXTRACT_SYSTEM = (
     "Извлеки из сообщения до трёх проверяемых фактических утверждений "
@@ -62,17 +79,25 @@ EVALUATE_NO_SOURCES_SYSTEM = (
 )
 
 
-def _settings() -> tuple[str, str, str]:
-    return (
-        os.environ.get("LLM_API_KEY", ""),
-        os.environ.get("LLM_BASE_URL", "").rstrip("/"),
-        os.environ.get("LLM_MODEL", ""),
-    )
+def _settings(tier: Any = None) -> tuple[str, str, str]:
+    """Ключ, адрес шлюза и модель.
+
+    Модель берётся из профиля тарифа (``LLM_MODEL_FREE`` / ``_PRO`` /
+    ``_MAX``). Если конкретная переменная не задана — общий ``LLM_MODEL``.
+    Так три уровня можно развести по разным моделям, не ломая настройку.
+    """
+    api_key = os.environ.get("LLM_API_KEY", "")
+    base_url = os.environ.get("LLM_BASE_URL", "").rstrip("/")
+    default_model = os.environ.get("LLM_MODEL", "")
+    model = tier.model(default_model) if tier is not None else default_model
+    return (api_key, base_url, model)
 
 
-def _post_sync(system: str, user: str, timeout: int) -> Optional[str]:
+def _post_sync(
+    system: str, user: str, timeout: int, tier: Any = None
+) -> Optional[str]:
     """Синхронный вызов. Запускается в потоке, чтобы не блокировать loop."""
-    api_key, base_url, model = _settings()
+    api_key, base_url, model = _settings(tier)
     if not (api_key and base_url and model):
         return None
 
@@ -82,8 +107,8 @@ def _post_sync(system: str, user: str, timeout: int) -> Optional[str]:
     payload = json.dumps(
         {
             "model": model,
-            "temperature": 0,
-            "max_tokens": 400,
+            "temperature": getattr(tier, "temperature", 0),
+            "max_tokens": getattr(tier, "max_tokens", 400),
             "messages": [
                 {"role": "user", "content": system + chr(10)*2 + user},
             ],
@@ -111,11 +136,13 @@ def _post_sync(system: str, user: str, timeout: int) -> Optional[str]:
         return None
 
 
-async def _post(system: str, user: str, timeout: int = CALL_TIMEOUT) -> Optional[str]:
+async def _post(
+    system: str, user: str, timeout: int = CALL_TIMEOUT, tier: Any = None
+) -> Optional[str]:
     """Асинхронная обёртка с таймаутом. None при любой проблеме."""
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(_post_sync, system, user, timeout),
+            asyncio.to_thread(_post_sync, system, user, timeout, tier),
             timeout=timeout + 2,
         )
     except (asyncio.TimeoutError, Exception):
@@ -201,11 +228,14 @@ def _json_from(raw: str) -> Optional[dict[str, Any]]:
         return None
 
 
-async def extract_with_llm(text: str, limit: int = 3) -> Optional[list[str]]:
+async def extract_with_llm(
+    text: str, limit: int = 3, tier: Tier = BASE
+) -> Optional[list[str]]:
     """Утверждения через модель. None — модель недоступна или ответ мусорный."""
     raw = await _post(
         EXTRACT_SYSTEM,
         f"Сообщение:\n{text[:MESSAGE_CHARS]}",
+        tier=tier,
     )
     if not raw:
         return None
@@ -226,8 +256,31 @@ async def extract_with_llm(text: str, limit: int = 3) -> Optional[list[str]]:
     return out or None
 
 
+def _depth_suffix(tier: Tier) -> str:
+    """Дописать к промпту требование по глубине ответа.
+
+    Вердикт один и тот же на всех уровнях, поэтому все уровни обязаны
+    вернуть ``status``. Разница — что кроме него просят добавить.
+    """
+    if tier is MAX:
+        return (
+            " Полный разбор: по каждому утверждению дай "
+            '{"status","quote","explanation","action","resend"}; action — что '
+            "человеку делать дальше, resend — готовая фраза для пересылки в чат."
+        )
+    if tier is PLUS:
+        return (
+            " Дай разбор: объяснение на две-три фразы, дословную цитату из "
+            "источника и что проверить дальше (поле action)."
+        )
+    # База: сырой короткий ответ, без разбора.
+    return " Ответь максимально коротко: только вердикт и одна фраза."
+
+
 async def evaluate_one_with_llm(
-    claim: str, sources: Sequence[FetchedSource]
+    claim: str,
+    sources: Sequence[FetchedSource],
+    tier: Optional[Tier] = None,
 ) -> Optional[dict[str, Any]]:
     """Оценить ОДНО утверждение. Один вызов — один вердикт.
 
@@ -239,9 +292,16 @@ async def evaluate_one_with_llm(
     «insufficient» или «contradicted» по признакам самой новости
     (абсурдность, срочность, отсутствие атрибуции). «supported» без
     источника не принимается: подтверждать нечем.
+
+    **Вердикт не зависит от тарифа.** Сначала он считается одним и тем же
+    промптом и той же моделью для всех уровней — иначе «Плюс» и «Макс»
+    получали бы другой ответ на тот же вопрос, а это уже не тариф, а
+    лотерея. Только после этого тариф расширяет объяснение отдельным
+    вызовом, который вердикт менять не может.
     """
+    tier = tier or BASE
     blocks = "\n\n".join(
-        f"[{s.id}] {s.title}\n{s.content[:SOURCE_SNIPPET_CHARS]}"
+        f"[{s.id}] {s.title}\n{s.content[:BASE.source_chars]}"
         for s in sources[:2]
     )
 
@@ -257,7 +317,38 @@ async def evaluate_one_with_llm(
         )
         system = EVALUATE_NO_SOURCES_SYSTEM
 
-    raw = await _post(system, user)
+    # Вердикт считается один раз на утверждение+источники и запоминается.
+    # Модель недетерминирована даже при temperature=0 — без кэша «База» и
+    # «Плюс» получали разные вердикты на один и тот же текст.
+    cache_key = _verdict_key(claim, sources)
+    cached = _VERDICT_CACHE.get(cache_key)
+    if cached is not None:
+        base_answer = cached
+    else:
+        raw = await _post(system, user, tier=BASE)
+        base_answer = _parse_verdict(raw, has_sources=bool(blocks))
+        if base_answer is None:
+            return None
+        if len(_VERDICT_CACHE) >= _VERDICT_CACHE_MAX:
+            _VERDICT_CACHE.clear()
+        _VERDICT_CACHE[cache_key] = base_answer
+
+    out = dict(base_answer)
+    # Тариф расширяет разбор отдельным вызовом. Вердикт уже зафиксирован
+    # выше и здесь не меняется — модель только объясняет и советует.
+    if tier is not BASE:
+        extra = await expand_explanation(claim, out, blocks, tier)
+        if extra:
+            out["explanation"] = extra.get("explanation") or out["explanation"]
+            if extra.get("action"):
+                out["action"] = extra["action"]
+            if extra.get("resend"):
+                out["resend"] = extra["resend"]
+    return out
+
+
+def _parse_verdict(raw: Optional[str], has_sources: bool) -> Optional[dict[str, Any]]:
+    """Разобрать ответ модели в вердикт. None — ответ непригоден."""
     if not raw:
         return None
     data = _json_from(raw)
@@ -274,13 +365,124 @@ async def evaluate_one_with_llm(
     status = str(data.get("status", "")).strip()
     if status not in ("supported", "contradicted", "insufficient"):
         return None
-    if not blocks and status == "supported":
+    # «supported» без источника не принимается: подтверждать нечем.
+    if not has_sources and status == "supported":
         status = "insufficient"
     return {
         "status": status,
         "quote": str(data.get("quote", ""))[:400],
         "explanation": str(data.get("explanation", ""))[:300],
     }
+
+
+EXPAND_SYSTEM = (
+    "Ты объясняешь уже вынесенный вердикт фактчекера. Вердикт менять "
+    "нельзя: он проверен отдельно. Твоя задача — развернуть его для "
+    "человека. Не выдумывай фактов, которых нет в источниках. "
+    "Пиши по-русски, коротко и по делу."
+)
+
+
+def _as_text(value: Any, limit: int) -> str:
+    """Поле ответа в строку. Модель иногда присылает список шагов."""
+    if isinstance(value, (list, tuple)):
+        parts = [str(v).strip() for v in value if str(v).strip()]
+        text = "; ".join(parts)
+    elif isinstance(value, dict):
+        text = str(value.get("text") or value.get("value") or "")
+    else:
+        text = str(value or "")
+    return text.strip()[:limit]
+
+
+#: Служебные коды модели → слова, которые поймёт читатель в чате.
+_STATUS_WORDS = {
+    "supported": "правда",
+    "contradicted": "фейк",
+    "insufficient": "непонятно",
+    "context": "нужен контекст",
+}
+
+
+def _human_resend(text: str, verdict: dict[str, Any]) -> str:
+    """Убрать из готовой пересылки служебные коды вроде «insufficient»."""
+    out = text
+    for code, word in _STATUS_WORDS.items():
+        out = out.replace(f"Вердикт: {code}", f"Вердикт: {word}")
+        out = out.replace(f"вердикт: {code}", f"вердикт: {word}")
+        out = out.replace(f"({code})", f"({word})")
+        out = out.replace(f"«{code}»", f"«{word}»")
+        out = out.replace(code, word)
+    return out.strip()
+
+
+def _verdict_word(status: Optional[str]) -> str:
+    return _STATUS_WORDS.get(str(status or ""), "непонятно")
+
+
+async def expand_explanation(
+    claim: str,
+    verdict: dict[str, Any],
+    blocks: str,
+    tier: Tier,
+) -> Optional[dict[str, Any]]:
+    """Развернуть готовый вердикт по тарифу. Вердикт не меняет.
+
+    База ничего не разворачивает: у неё есть только сам вердикт и одна
+    фраза. «Плюс» получает объяснение и что делать, «Макс» — ещё и
+    готовую фразу для пересылки.
+    """
+    if tier is BASE:
+        return None
+
+    want = '{"explanation":"2-3 фразы","action":"одно-два предложения"}'
+    if tier is MAX:
+        want = (
+            '{"explanation":"подробный разбор: что известно, чего нет, почему '
+            'такой вердикт","action":"что делать дальше по шагам, одной строкой",'
+            '"resend":"готовая фраза для пересылки в чат: по-русски, от первого '
+            'лица, без служебных слов и кодов"}'
+        )
+
+    user = (
+        f"УТВЕРЖДЕНИЕ: {claim[:500]}\n"
+        f"ВЕРДИКТ: {_verdict_word(verdict.get('status'))}\n"
+        f"ЧТО УЖЕ СКАЗАНО: {verdict.get('explanation', '')}\n"
+    )
+    if blocks:
+        user += f"\nИСТОЧНИКИ (только для опоры):\n{blocks}"
+    user += f"\n\nОтвет строго JSON: {want}"
+
+    raw = await _post(EXPAND_SYSTEM, user, tier=tier)
+    if not raw:
+        return None
+    data = _json_from(raw)
+    if not data:
+        text = _explanation_from_text(raw)
+        return {"explanation": text} if text else None
+
+    # «Макс» иногда отвечает вложенной структурой: {"status":..., "analysis":
+    # [{"explanation":..., "action":..., "resend":...}]}. Это тот же ответ,
+    # только этажом ниже — достаём поля из вложенного элемента.
+    nested = data.get("analysis")
+    if isinstance(nested, list) and nested and isinstance(nested[0], dict):
+        merged = dict(data)
+        for key, value in nested[0].items():
+            merged.setdefault(key, value)
+        data = merged
+
+    out: dict[str, Any] = {}
+    explanation = _as_text(data.get("explanation"), 600 if tier is MAX else 400)
+    if explanation:
+        out["explanation"] = explanation
+    action = _as_text(data.get("action"), 300)
+    if action:
+        out["action"] = action
+    if tier is MAX:
+        resend = _human_resend(_as_text(data.get("resend"), 400), verdict)
+        if resend:
+            out["resend"] = resend
+    return out or None
 
 
 # ---------------------------------------------------------------- фото и видео
@@ -318,20 +520,26 @@ def _media_summary(signals: Sequence[Any], caption: str, kind: str) -> str:
 
 
 async def explain_media(
-    signals: Sequence[Any], caption: str = "", kind: str = "изображение"
+    signals: Sequence[Any],
+    caption: str = "",
+    kind: str = "изображение",
+    tier: Tier = BASE,
 ) -> Optional[dict[str, Any]]:
     """Объяснить вердикт по фото или видео словами модели.
 
     Возвращает {"verdict": ..., "explanation": ...} или None, если модели
     нет или она не ответила. Сигналы детекторов уже посчитаны — модель
     не заменяет их, а переводит их отчёт на человеческий язык.
+
+    ``tier`` — уровень тарифа: база объясняет одной фразой, плюс и макс
+    добавляют «что делать». Вердикт детекторов не меняется.
     """
-    api_key, base_url, model = _settings()
+    api_key, base_url, model = _settings(tier)
     if not (api_key and base_url and model):
         return None
 
     user = _media_summary(signals, caption, kind)
-    raw = await _post(MEDIA_SYSTEM, user)
+    raw = await _post(MEDIA_SYSTEM + _depth_suffix(tier), user, tier=tier)
     if not raw:
         return None
 
@@ -348,4 +556,9 @@ async def explain_media(
     explanation = str(data.get("explanation", "")).strip()[:600]
     if not explanation:
         return None
-    return {"verdict": verdict, "explanation": explanation}
+    out: dict[str, Any] = {"verdict": verdict, "explanation": explanation}
+    if tier is not BASE:
+        action = str(data.get("action", "")).strip()
+        if action:
+            out["action"] = action[:300]
+    return out

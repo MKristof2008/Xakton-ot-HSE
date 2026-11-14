@@ -374,6 +374,29 @@ function ClaimRow({ claim, index }: { claim: ClaimFinding; index: number }) {
         </a>
       )}
 
+      {claim.action && (
+        <p className="signal__action">
+          <span className="signal__action-label">Что делать</span>
+          {claim.action}
+        </p>
+      )}
+
+      {claim.resend && (
+        <div className="signal__resend">
+          <span className="signal__action-label">Готово к пересылке</span>
+          <p className="signal__resend-text">{claim.resend}</p>
+          <button
+            type="button"
+            className="btn btn--ghost btn--small"
+            onClick={() => {
+              void navigator.clipboard?.writeText(claim.resend ?? '');
+            }}
+          >
+            Скопировать
+          </button>
+        </div>
+      )}
+
       {claim.limitations.length > 0 && (
         <ul className="limits">
           {claim.limitations.map((lim, i) => (

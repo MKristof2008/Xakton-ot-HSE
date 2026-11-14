@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
 from . import reputation
+from .tariffs import BASE, Tier
 from .sources import (
     CatalogProvider,
     FetchedSource,
@@ -49,9 +50,13 @@ class ClaimFinding:
     source_url: str = ""
     trusted: bool = False
     limitations: list[str] = field(default_factory=list)
+    #: Что человеку делать дальше. Появляется с тарифа «Плюс».
+    action: str = ""
+    #: Готовая фраза для пересылки в чат. Появляется на «Максе».
+    resend: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "text": self.text,
             "status": self.status,
             "explanation": self.explanation,
@@ -61,6 +66,12 @@ class ClaimFinding:
             "trusted": self.trusted,
             "limitations": self.limitations,
         }
+        # Пустые поля не отдаём: у базы их нет, и это честно.
+        if self.action:
+            out["action"] = self.action
+        if self.resend:
+            out["resend"] = self.resend
+        return out
 
 
 @dataclass
@@ -398,14 +409,17 @@ _CACHE_TTL = 6 * 3600
 _CACHE_MAX = 500
 
 
-def _cache_key(text: str) -> str:
+def _cache_key(text: str, tier_key: str = "base") -> str:
     import hashlib
 
-    return hashlib.sha256(" ".join((text or "").lower().split()).encode()).hexdigest()
+    # Ключ тарифа входит в хеш: у «Плюса» и «Макса» другой разбор,
+    # и отдавать им закэшированный короткий ответ нельзя.
+    source = " ".join((text or "").lower().split()) + "|" + tier_key
+    return hashlib.sha256(source.encode()).hexdigest()
 
 
-def _cache_get(text: str) -> Optional["CheckOutcome"]:
-    key = _cache_key(text)
+def _cache_get(text: str, tier_key: str = "base") -> Optional["CheckOutcome"]:
+    key = _cache_key(text, tier_key)
     hit = _CACHE.get(key)
     if hit is None:
         return None
@@ -418,7 +432,7 @@ def _cache_get(text: str) -> Optional["CheckOutcome"]:
     return outcome
 
 
-def _cache_put(text: str, outcome: "CheckOutcome") -> None:
+def _cache_put(text: str, outcome: "CheckOutcome", tier_key: str = "base") -> None:
     import time
 
     if not (text or "").strip():
@@ -426,7 +440,7 @@ def _cache_put(text: str, outcome: "CheckOutcome") -> None:
     if len(_CACHE) >= _CACHE_MAX:
         oldest = min(_CACHE, key=lambda k: _CACHE[k][0])
         _CACHE.pop(oldest, None)
-    _CACHE[_cache_key(text)] = (time.time(), outcome)
+    _CACHE[_cache_key(text, tier_key)] = (time.time(), outcome)
 
 
 def llm_enabled() -> bool:
@@ -484,10 +498,13 @@ async def run_check(
     url: Optional[str] = None,
     extra_sources: Optional[Sequence[FetchedSource]] = None,
     kb_path: Any = None,
+    tier: Tier = BASE,
 ) -> CheckOutcome:
     """Полная проверка текста. Единая точка входа для backend.
 
     Порядок: извлечь утверждения → собрать источники → оценить → валидация.
+    ``tier`` — уровень тарифа: он задаёт модель, глубину ответа и объём
+    источника. Вердикт от уровня не зависит, разбор — зависит.
     """
     import time
 
@@ -496,7 +513,7 @@ async def run_check(
     # Кэш: одинаковый текст должен давать одинаковый ответ. Поиск и модель
     # нестабильны между вызовами, а пользователь вправе получить тот же
     # результат, что и час назад.
-    cached = _cache_get(text)
+    cached = _cache_get(text, tier.key)
     if cached is not None:
         cached.duration_ms = int((time.monotonic() - started) * 1000)
         return cached
@@ -538,8 +555,11 @@ async def run_check(
             # Одно короткое сообщение — одно утверждение. Дробить его на
             # три части вредно: части начинают противоречить друг другу,
             # и итог уходит в «Туман» из-за конфликта, которого нет.
+            # Извлечение утверждений — всегда на базовом профиле: набор
+            # утверждений должен совпадать на всех тарифах, иначе вердикт
+            # разойдётся не из-за глубины, а из-за разбиения текста.
             if len(text) > 400:
-                extracted = await extract_with_llm(text) or []
+                extracted = await extract_with_llm(text, tier=BASE) or []
                 if extracted:
                     claims = extracted
                     mode = "llm"
@@ -623,12 +643,18 @@ async def run_check(
         finding = ClaimFinding(text=claim, status="insufficient",
                                explanation="В доступных источниках нет подтверждения.")
         if llm_used and evaluate_one_with_llm is not None:
-            answer = await evaluate_one_with_llm(claim, evidence_sources)
+            answer = await evaluate_one_with_llm(claim, evidence_sources, tier)
             if answer is None:
                 return _judge_by_overlap(claim, sources), True
             finding.status = answer["status"]
             finding.explanation = answer["explanation"] or finding.explanation
             finding.quote = answer["quote"]
+            # Уровень «Плюс» и выше приносит «что делать», «Макс» — ещё и
+            # готовую формулировку для пересылки. Вердикт от этого не меняется.
+            if answer.get("action"):
+                finding.action = answer["action"]
+            if answer.get("resend"):
+                finding.resend = answer["resend"]
             # «Нет события в источниках» — это не опровержение. Опровергает
             # только прямая противоположность, её ставит модель сама.
             # Подтверждение обязано опираться на дословную цитату.
@@ -738,6 +764,7 @@ async def run_check(
     level, verdict, score, uncertainty = _level_for(
         findings, searched=bool(evidence_sources), strict_allowed=strict_allowed
     )
+    limitations = [lim for f in findings for lim in f.limitations]
     # Понятная причина «непонятно»: пользователь должен знать, почему
     # система не дала ответ, а не гадать, сломалась она или нет.
     if verdict == "непонятно":
@@ -785,5 +812,5 @@ async def run_check(
         limitations=limitations,
         duration_ms=int((time.monotonic() - started) * 1000),
     )
-    _cache_put(text, outcome)
+    _cache_put(text, outcome, tier.key)
     return outcome

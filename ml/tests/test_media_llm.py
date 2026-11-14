@@ -36,6 +36,13 @@ from lakmus.llm_pipeline import explain_media  # noqa: E402
 client = TestClient(app)
 
 
+def auth_headers() -> dict[str, str]:
+    """Проверка идёт только по аккаунту: тариф team снимает лимит free."""
+    token = client.post("/api/users").json()["token"]
+    client.post("/api/upgrade", json={"plan": "team"}, headers={"X-Token": token})
+    return {"X-Token": token}
+
+
 # ---------------------------------------------------------------- файлы
 
 def png_bytes() -> bytes:
@@ -76,7 +83,11 @@ def text_atom(name: bytes, value: str) -> bytes:
 # ---------------------------------------------------------------- фото
 
 def test_photo_uses_image_signals_only():
-    r = client.post("/api/check", files={"image": ("p.png", png_bytes(), "image/png")})
+    r = client.post(
+        "/api/check",
+        files={"image": ("p.png", png_bytes(), "image/png")},
+        headers=auth_headers(),
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["verdict"] in ("правда", "фейк", "непонятно")
@@ -85,7 +96,11 @@ def test_photo_uses_image_signals_only():
 
 def test_photo_with_editor_metadata_is_explained():
     data = jpeg_with_editor()
-    r = client.post("/api/check", files={"image": ("p.jpg", data, "image/jpeg")})
+    r = client.post(
+        "/api/check",
+        files={"image": ("p.jpg", data, "image/jpeg")},
+        headers=auth_headers(),
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     # В ответе всегда есть чем объяснить вердикт: модель или детекторы.
@@ -93,31 +108,45 @@ def test_photo_with_editor_metadata_is_explained():
 
 
 def test_photo_caption_reaches_payload():
+    headers = auth_headers()
     r = client.post(
         "/api/check",
         data={"text": "Снимок сделан вчера в Казани"},
         files={"image": ("p.png", png_bytes(), "image/png")},
+        headers=headers,
     )
     assert r.status_code == 200, r.text
     # Подпись сохраняется в паспорте — по ней потом ищут проверку.
     passport = r.json()["passport"]
-    page = client.get(passport)
+    page = client.get(passport, headers=headers)
     assert page.status_code == 200
 
 
 def test_photo_without_metadata_is_honest():
     """Скриншот из мессенджера: метаданных нет — это не доказательство."""
-    r = client.post("/api/check", files={"image": ("s.png", png_bytes(), "image/png")})
+    r = client.post(
+        "/api/check",
+        files={"image": ("s.png", png_bytes(), "image/png")},
+        headers=auth_headers(),
+    )
     body = r.json()
     assert body["verdict"] in ("правда", "фейк", "непонятно")
-    assert "explanation" in body
+    # Объяснение даёт либо модель, либо детекторы. Без ключа модели
+    # остаётся пометка «detectors» — это честно, а не пустой экран.
+    assert body["explanation_source"] in ("model", "detectors")
+    if body["explanation_source"] == "model":
+        assert body.get("explanation")
 
 
 # ---------------------------------------------------------------- видео
 
 def test_video_accepted_and_saved():
     data = mp4(text_atom(b"\xa9too", "Lavf58.29.100"))
-    r = client.post("/api/check", files={"video": ("c.mp4", data, "video/mp4")})
+    r = client.post(
+        "/api/check",
+        files={"video": ("c.mp4", data, "video/mp4")},
+        headers=auth_headers(),
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["passport"].startswith("/p/")
@@ -125,13 +154,21 @@ def test_video_accepted_and_saved():
 
 def test_video_with_generator_marker_leans_fake():
     data = mp4(text_atom(b"\xa9too", "Generated with Sora"))
-    r = client.post("/api/check", files={"video": ("c.mp4", data, "video/mp4")})
+    r = client.post(
+        "/api/check",
+        files={"video": ("c.mp4", data, "video/mp4")},
+        headers=auth_headers(),
+    )
     body = r.json()
     assert body["verdict"] == "фейк"
 
 
 def test_video_wrong_container_rejected():
-    r = client.post("/api/check", files={"video": ("c.avi", b"RIFF0000AVI ", "video/avi")})
+    r = client.post(
+        "/api/check",
+        files={"video": ("c.avi", b"RIFF0000AVI ", "video/avi")},
+        headers=auth_headers(),
+    )
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "BAD_INPUT"
 
@@ -141,6 +178,7 @@ def test_video_too_large_rejected(monkeypatch):
     r = client.post(
         "/api/check",
         files={"video": ("c.mp4", mp4(text_atom(b"\xa9too", "x")), "video/mp4")},
+        headers=auth_headers(),
     )
     assert r.status_code == 422
     assert "25 МБ" in r.json()["error"]["message"] or "МБ" in r.json()["error"]["message"]
@@ -187,7 +225,7 @@ async def test_explain_media_parses_json(monkeypatch):
     monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid")
     monkeypatch.setenv("LLM_MODEL", "test-model")
 
-    async def fake_post(system, user, timeout=30):
+    async def fake_post(system, user, timeout=30, tier=None):
         assert "детектор" in system.lower()
         return '{"verdict":"fake","explanation":"Признаки монтажа сильные."}'
 
@@ -205,7 +243,7 @@ async def test_explain_media_rejects_unknown_verdict(monkeypatch):
     monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid")
     monkeypatch.setenv("LLM_MODEL", "test-model")
 
-    async def fake_post(system, user, timeout=30):
+    async def fake_post(system, user, timeout=30, tier=None):
         return '{"verdict":"сто процентов правда","explanation":"Всё ок."}'
 
     monkeypatch.setattr("lakmus.llm_pipeline._post", fake_post)
@@ -220,7 +258,7 @@ async def test_explain_media_text_answer_falls_back_to_unclear(monkeypatch):
     monkeypatch.setenv("LLM_BASE_URL", "https://example.invalid")
     monkeypatch.setenv("LLM_MODEL", "test-model")
 
-    async def fake_post(system, user, timeout=30):
+    async def fake_post(system, user, timeout=30, tier=None):
         return "Похоже на подделку, но доказательств мало."
 
     monkeypatch.setattr("lakmus.llm_pipeline._post", fake_post)
@@ -236,11 +274,15 @@ def test_model_does_not_change_detector_verdict(monkeypatch):
     """
     data = mp4(text_atom(b"\xa9too", "Generated with Sora"))
 
-    async def fake_explain(signals, caption="", kind=""):
+    async def fake_explain(signals, caption="", kind="", tier=None):
         return {"verdict": "real", "explanation": "Всё настоящее."}
 
     monkeypatch.setattr(backend_main, "explain_media", fake_explain)
-    r = client.post("/api/check", files={"video": ("c.mp4", data, "video/mp4")})
+    r = client.post(
+        "/api/check",
+        files={"video": ("c.mp4", data, "video/mp4")},
+        headers=auth_headers(),
+    )
     body = r.json()
     # Детекторы сказали «фейк» — модель это не отменяет.
     assert body["verdict"] == "фейк"

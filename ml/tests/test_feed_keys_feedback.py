@@ -38,8 +38,8 @@ def new_user(plan: str = "free") -> str:
 
 # ---------- лента ----------
 
-def test_feed_returns_items_with_passport():
-    client.post("/api/check", json={"text": TEXT})
+def test_feed_returns_items_with_passport(auth_headers):
+    client.post("/api/check", json={"text": TEXT}, headers=auth_headers)
     body = client.get("/api/feed").json()
     assert body["items"], "после проверки лента не должна быть пустой"
     item = body["items"][0]
@@ -107,8 +107,8 @@ def test_revoked_key_stops_working():
     body = client.post(
         "/api/check", json={"text": TEXT}, headers={"X-Api-Key": created["key"]}
     ).json()
-    # Отозванный ключ не даёт тарифа: ответ как у анонимного пользователя.
-    assert body["plan"] == "free"
+    # Отозванный ключ не даёт тарифа, а без токена проверки нет вовсе.
+    assert body["error"]["code"] == "UNAUTHORIZED"
 
 
 def test_cannot_revoke_someone_elses_key():
@@ -121,11 +121,12 @@ def test_cannot_revoke_someone_elses_key():
 
 # ---------- обратная связь ----------
 
-def test_feedback_accepted_and_counted():
-    check = client.post("/api/check", json={"text": TEXT}).json()
+def test_feedback_accepted_and_counted(auth_headers):
+    check = client.post("/api/check", json={"text": TEXT}, headers=auth_headers).json()
     r = client.post(
         "/api/feedback",
         json={"check_id": check["id"], "verdict_ok": False, "expected": "фейк"},
+        headers=auth_headers,
     )
     assert r.status_code == 200
     assert r.json()["ok"] is True
@@ -141,10 +142,11 @@ def test_feedback_unknown_check_rejected():
     assert r.status_code == 404
 
 
-def test_feedback_bad_expected_rejected():
-    check = client.post("/api/check", json={"text": TEXT}).json()
+def test_feedback_bad_expected_rejected(auth_headers):
+    check = client.post("/api/check", json={"text": TEXT}, headers=auth_headers).json()
     r = client.post(
         "/api/feedback",
         json={"check_id": check["id"], "verdict_ok": False, "expected": "может быть"},
+        headers=auth_headers,
     )
     assert r.status_code == 422
