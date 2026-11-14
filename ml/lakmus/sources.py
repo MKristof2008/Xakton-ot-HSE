@@ -68,6 +68,8 @@ class FetchedSource:
     published_at: Optional[str] = None
     retrieved_at: Optional[str] = None
     domain: str = ""
+    #: Репутация домена, заполняется пайплайном (trusted/satire/untrusted/unknown)
+    reputation: str = "unknown"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +80,7 @@ class FetchedSource:
             "published_at": self.published_at,
             "retrieved_at": self.retrieved_at,
             "domain": self.domain,
+            "reputation": self.reputation,
         }
 
 

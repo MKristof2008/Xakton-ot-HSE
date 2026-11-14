@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sys
@@ -88,6 +89,8 @@ class CheckRequest(BaseModel):
     # Текст необязателен: пользователь может прислать только ссылку из
     # мессенджера — это самый частый сценарий, по словам главреда.
     text: str = Field(default="", max_length=MAX_TEXT)
+    #: Ссылка на проверяемую страницу. Нужна и для распознавания
+    #: сатирического сайта до всякой модели, и как замена тексту.
     url: Optional[str] = None
 
 
@@ -140,6 +143,16 @@ def verdict_of(result: Any) -> str:
     if level in ("likely_fake", "doubtful"):
         return "фейк"
     return "непонятно"
+
+
+def _clean_url(value: Optional[str]) -> Optional[str]:
+    """Проверить, что ссылка выглядит как http(s), иначе не использовать."""
+    if not value:
+        return None
+    candidate = value.strip()
+    if not re.match(r"^https?://[^\s]+$", candidate, re.I):
+        return None
+    return candidate[:2000]
 
 
 def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
@@ -244,7 +257,8 @@ async def check_text(
         if not url.startswith(("http://", "https://")):
             return fail("BAD_INPUT", "ссылка должна начинаться с http:// или https://", 422)
         from lakmus.sources import fetch_page
-        page = fetch_page(url) or ""
+        # В потоке: синхронное скачивание иначе держит event loop до 12 с.
+        page = await asyncio.to_thread(fetch_page, url) or ""
         text = page.strip()[:MAX_TEXT]
 
     if len(text) < 8:
@@ -275,7 +289,7 @@ async def check_text(
     try:
         # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
         # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
-        outcome = await run_full_check(text, url=url)
+        outcome = await run_full_check(text, url=_clean_url(url))
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
 
