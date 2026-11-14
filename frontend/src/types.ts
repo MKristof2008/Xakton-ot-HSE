@@ -103,14 +103,10 @@ export interface PlanInfo {
   id: Plan;
   name: string;
   price_rub: number;
+  price_year_rub?: number;
   limits: string;
   features: string[];
   recommended?: boolean;
-}
-
-export interface PricingResponse {
-  plans: PlanInfo[];
-  note: string;
 }
 
 export interface Me {
@@ -118,6 +114,25 @@ export interface Me {
   plan: Plan;
   quota_left?: number;
   quota_per_day?: number;
+}
+
+export interface Payment {
+  id: string;
+  plan: string;
+  amount_rub: number;
+  status: 'pending' | 'paid' | 'failed';
+  method: 'card' | 'sbp' | 'invoice';
+  created_at: string;
+  confirmed_at?: string | null;
+  plan_name?: string;
+  days?: number;
+}
+
+export interface PricingResponse {
+  plans: PlanInfo[];
+  note: string;
+  trial?: { days: number; note: string };
+  demo_warning?: string;
 }
 
 export interface ApiErrorBody {

@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS users (
     expires_at  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS payments (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    plan          TEXT NOT NULL,
+    amount_rub    INTEGER NOT NULL,
+    status        TEXT NOT NULL,
+    method        TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    confirmed_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+
 CREATE TABLE IF NOT EXISTS top_pins (
     text_hash   TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
@@ -106,13 +118,94 @@ def user_by_token(token: str) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+PLAN_PRICES: dict[str, int] = {"free": 0, "pro": 300, "team": 5000}
+PLAN_DAYS: dict[str, int] = {"free": 0, "pro": 30, "team": 30}
+
+
 def upgrade_user(token: str, plan: str = "pro") -> bool:
-    """Демо-апгрейд тарифа. В реальном продукте здесь платёжный провайдер."""
-    if plan not in ("free", "pro"):
+    """Прямой апгрейд без оплаты. Только для тестов и админки.
+
+    Пользовательский путь идёт через платежи: см. create_payment /
+    confirm_payment. Здесь оставлено для внутренних сценариев.
+    """
+    if plan not in PLAN_PRICES:
         return False
     with connect() as conn:
         cur = conn.execute("UPDATE users SET plan = ? WHERE token = ?", (plan, token))
     return cur.rowcount > 0
+
+
+# ---------- платежи ----------
+
+def create_payment(user_id: str, plan: str, method: str = "card") -> Optional[dict[str, Any]]:
+    """Создать платёж в статусе pending. None — неизвестный тариф."""
+    if plan not in PLAN_PRICES or plan == "free":
+        return None
+    payment_id = f"pay_{secrets.token_hex(6)}"
+    amount = PLAN_PRICES[plan]
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO payments(id, user_id, plan, amount_rub, status, method,"
+            " created_at) VALUES(?,?,?,?,?,?,?)",
+            (payment_id, user_id, plan, amount, "pending", method, now_iso()),
+        )
+    return {
+        "id": payment_id,
+        "plan": plan,
+        "amount_rub": amount,
+        "status": "pending",
+        "method": method,
+        "created_at": now_iso(),
+    }
+
+
+def get_payment(payment_id: str) -> Optional[dict[str, Any]]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM payments WHERE id = ?", (payment_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def confirm_payment(payment_id: str) -> Optional[dict[str, Any]]:
+    """Провести платёж: тариф пользователя повышается, срок продлевается.
+
+    Идемпотентно: повторное подтверждение не продлевает подписку дважды.
+    """
+    payment = get_payment(payment_id)
+    if payment is None:
+        return None
+    if payment["status"] == "paid":
+        return {**payment, "already_paid": True}
+
+    stamp = now_iso()
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE payments SET status = 'paid', confirmed_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (stamp, payment_id),
+        )
+        if cur.rowcount == 0:
+            return get_payment(payment_id)
+
+        days = PLAN_DAYS.get(payment["plan"], 30)
+        conn.execute(
+            "UPDATE users SET plan = ?, expires_at = datetime('now', ?) "
+            "WHERE id = ?",
+            (payment["plan"], f"+{days} days", payment["user_id"]),
+        )
+    result = get_payment(payment_id) or payment
+    return result
+
+
+def payment_history(user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM payments WHERE user_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (user_id, int(limit)),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def checks_today(user_id: str) -> int:

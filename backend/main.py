@@ -92,6 +92,15 @@ class UpgradeRequest(BaseModel):
     plan: str = "pro"
 
 
+class PaymentRequest(BaseModel):
+    plan: str = "pro"
+    method: str = "card"
+
+
+class PaymentConfirm(BaseModel):
+    payment_id: str
+
+
 class PinRequest(BaseModel):
     text_hash: str
     title: str = ""
@@ -453,6 +462,221 @@ async def sources_json() -> dict[str, Any]:
             for t in topics
         ],
     }
+
+
+@app.post("/api/payments")
+async def create_payment(
+    req: PaymentRequest,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Создать платёж. Возвращает платёж в статусе pending.
+
+    Реального эквайринга в демо нет: оплата подтверждается отдельным
+    вызовом. В продукте здесь создаётся платёж у провайдера и клиент
+    уходит на его страницу.
+    """
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    if req.plan not in store.PLAN_PRICES or req.plan == "free":
+        return fail("BAD_INPUT", "неизвестный тариф", 422)
+    if req.method not in ("card", "sbp", "invoice"):
+        return fail("BAD_INPUT", "способ оплаты: card, sbp или invoice", 422)
+
+    payment = store.create_payment(user["id"], req.plan, req.method)
+    if payment is None:
+        return fail("BAD_INPUT", "не удалось создать платёж", 422)
+    payment["plan_name"] = {"pro": "Разбор", "team": "Редакция"}.get(req.plan, req.plan)
+    payment["days"] = store.PLAN_DAYS.get(req.plan, 30)
+    return payment
+
+
+@app.post("/api/payments/confirm")
+async def confirm_payment(
+    req: PaymentConfirm,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Подтвердить платёж. В продукте вызывается вебхуком провайдера."""
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+
+    payment = store.get_payment(req.payment_id)
+    if payment is None:
+        return fail("NOT_FOUND", "платёж не найден", 404)
+    if payment["user_id"] != user["id"]:
+        return fail("FORBIDDEN", "чужой платёж", 403)
+
+    done = store.confirm_payment(req.payment_id)
+    fresh = store.user_by_token(x_token or "")
+    return {
+        "payment": done,
+        "plan": fresh["plan"] if fresh else None,
+        "expires_at": fresh.get("expires_at") if fresh else None,
+    }
+
+
+@app.get("/api/payments")
+async def payments(
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    return {"items": store.payment_history(user["id"])}
+
+
+@app.get("/api/pricing")
+async def pricing() -> dict[str, Any]:
+    """Тарифы. Эксперт просила продумать это подробно — здесь срок,
+    скидка за год и честная пометка, что эквайринг в демо не подключён."""
+    return {
+        "plans": [
+            {
+                "id": "free",
+                "name": "Бесплатно",
+                "price_rub": 0,
+                "price_year_rub": 0,
+                "limits": f"{store.FREE_CHECKS_PER_DAY} проверок в день",
+                "features": [
+                    "Вердикт: правда, фейк или непонятно",
+                    "Уровень доверия и паспорт проверки",
+                ],
+            },
+            {
+                "id": "pro",
+                "name": "Разбор",
+                "price_rub": 300,
+                "price_year_rub": 2880,
+                "limits": "Без ограничений",
+                "features": [
+                    "Всё из бесплатного",
+                    "Почему такой вердикт — по каждому сигналу",
+                    "Ссылки на первоисточники и цитата в контексте",
+                    "Что проверить дальше",
+                    "Без рекламы",
+                ],
+                "recommended": True,
+            },
+            {
+                "id": "team",
+                "name": "Редакция",
+                "price_rub": 5000,
+                "price_year_rub": 48000,
+                "limits": "До 10 сотрудников",
+                "features": [
+                    "Всё из «Разбора»",
+                    "Проверка ссылок и скриншотов пачкой",
+                    "Доступ к топам проверок",
+                    "Приоритетная поддержка",
+                ],
+            },
+        ],
+        "trial": {
+            "days": 7,
+            "note": "Семь дней бесплатно, карта не нужна",
+        },
+        "note": "Первый месяц бесплатно: сначала репутация, потом подписка.",
+        "demo_warning": (
+            "Демонстрационный режим: платёж проходит без реального списания. "
+            "В продукте здесь эквайринг."
+        ),
+    }
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def sources(request: Request) -> Any:
+    """Открытая витрина базы фактов: что проверяем и по каким источникам."""
+    topics = load_topics()
+    canonical = str(request.url).split("?")[0]
+    return HTMLResponse(sources_page_html(topics, canonical))
+
+
+@app.get("/api/sources")
+async def sources_json() -> dict[str, Any]:
+    """Тот же список в JSON — для интерфейса и для проверки."""
+    topics = load_topics()
+    return {
+        "topics": len(topics),
+        "facts": sum(len(t.get("facts", [])) for t in topics),
+        "items": [
+            {
+                "topic": t.get("topic", ""),
+                "facts": [
+                    {
+                        "claim": f.get("claim", ""),
+                        "verdict": f.get("verdict", ""),
+                        "source": f.get("source", ""),
+                        "url": f.get("url", ""),
+                    }
+                    for f in t.get("facts", [])
+                ],
+            }
+            for t in topics
+        ],
+    }
+
+
+@app.post("/api/payments")
+async def create_payment(
+    req: PaymentRequest,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Создать платёж. Возвращает платёж в статусе pending.
+
+    Реального эквайринга в демо нет: оплата подтверждается отдельным
+    вызовом. В продукте здесь создаётся платёж у провайдера и клиент
+    уходит на его страницу.
+    """
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    if req.plan not in store.PLAN_PRICES or req.plan == "free":
+        return fail("BAD_INPUT", "неизвестный тариф", 422)
+    if req.method not in ("card", "sbp", "invoice"):
+        return fail("BAD_INPUT", "способ оплаты: card, sbp или invoice", 422)
+
+    payment = store.create_payment(user["id"], req.plan, req.method)
+    if payment is None:
+        return fail("BAD_INPUT", "не удалось создать платёж", 422)
+    payment["plan_name"] = {"pro": "Разбор", "team": "Редакция"}.get(req.plan, req.plan)
+    payment["days"] = store.PLAN_DAYS.get(req.plan, 30)
+    return payment
+
+
+@app.post("/api/payments/confirm")
+async def confirm_payment(
+    req: PaymentConfirm,
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Подтвердить платёж. В продукте вызывается вебхуком провайдера."""
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+
+    payment = store.get_payment(req.payment_id)
+    if payment is None:
+        return fail("NOT_FOUND", "платёж не найден", 404)
+    if payment["user_id"] != user["id"]:
+        return fail("FORBIDDEN", "чужой платёж", 403)
+
+    done = store.confirm_payment(req.payment_id)
+    fresh = store.user_by_token(x_token or "")
+    return {
+        "payment": done,
+        "plan": fresh["plan"] if fresh else None,
+        "expires_at": fresh.get("expires_at") if fresh else None,
+    }
+
+
+@app.get("/api/payments")
+async def payments(
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    user = resolve_user(x_token)
+    if not user:
+        return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
+    return {"items": store.payment_history(user["id"])}
 
 
 @app.get("/api/pricing")

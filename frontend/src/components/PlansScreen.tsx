@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { getMe, getPricing, upgrade } from '../api/client';
-import type { Me, PlanInfo } from '../types';
+import { getMe, getPricing } from '../api/client';
+import { PaymentDialog } from './PaymentDialog';
+import type { Me, PlanInfo, PricingResponse } from '../types';
 
 interface Props {
   me: Me | null;
@@ -13,16 +14,31 @@ const PLAN_ORDER: Record<string, number> = { free: 0, pro: 1, team: 2 };
 export function PlansScreen({ me, onMe }: Props) {
   const [plans, setPlans] = useState<PlanInfo[] | null>(null);
   const [note, setNote] = useState('');
+  const [trial, setTrial] = useState<PricingResponse['trial'] | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paying, setPaying] = useState<PlanInfo | null>(null);
 
   useEffect(() => {
+    // ?pay=pro — сразу открыть диалог оплаты (для демо и скриншотов).
+    const want = new URLSearchParams(window.location.search).get('pay');
+    if (want === 'pro' || want === 'team') {
+      setPaying({ id: want, name: want === 'pro' ? 'Разбор' : 'Редакция',
+        price_rub: want === 'pro' ? 300 : 5000, limits: '', features: [] });
+      if (new URLSearchParams(window.location.search).get('autopay') === '1') {
+        window.setTimeout(() => {
+          const btn = document.querySelector<HTMLButtonElement>('.pay__cta');
+          btn?.click();
+        }, 500);
+      }
+    }
     let alive = true;
     getPricing()
       .then((p) => {
         if (!alive) return;
         setPlans(p.plans);
         setNote(p.note);
+        setTrial(p.trial ?? null);
       })
       .catch(() => {
         if (alive) setError('Не удалось загрузить тарифы. Проверьте, что сервер запущен.');
@@ -32,17 +48,19 @@ export function PlansScreen({ me, onMe }: Props) {
     };
   }, []);
 
-  async function pick(plan: PlanInfo) {
+  function pick(plan: PlanInfo) {
     if (plan.id === 'free') return;
-    setPending(plan.id);
     setError(null);
+    setPaying(plan);
+  }
+
+  async function finishPayment() {
+    setPaying(null);
+    setPending(null);
     try {
-      await upgrade(plan.id);
       onMe(await getMe());
     } catch {
-      setError('Не удалось подключить тариф. Попробуйте ещё раз.');
-    } finally {
-      setPending(null);
+      /* тариф уже применён на сервере — интерфейс обновится при перезагрузке */
     }
   }
 
@@ -83,10 +101,27 @@ export function PlansScreen({ me, onMe }: Props) {
         </div>
       )}
 
+      {trial && (
+        <div className="trial-banner">
+          <span className="trial-banner__badge">{trial.days} дней бесплатно</span>
+          <span className="trial-banner__text">{trial.note}</span>
+        </div>
+      )}
+
       <p className="plans-note">
-        Демонстрация: оплата не подключена, тариф переключается сразу. В продукте здесь
-        платёжный провайдер.
+        Демонстрация: платёж проходит без списания денег. В продукте здесь эквайринг.
       </p>
+
+      {paying && (
+        <PaymentDialog
+          plan={paying.id === 'team' ? 'team' : 'pro'}
+          planName={paying.name}
+          amountRub={paying.price_rub}
+          days={30}
+          onClose={() => setPaying(null)}
+          onSuccess={() => void finishPayment()}
+        />
+      )}
     </div>
   );
 }

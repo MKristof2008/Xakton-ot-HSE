@@ -1,6 +1,7 @@
 import { apiBaseUrl } from '../config';
 import type {
   CheckResponse,
+  Payment,
   Me,
   PricingResponse,
   Stats,
@@ -110,4 +111,22 @@ export async function getPricing(): Promise<PricingResponse> {
 export async function upgrade(plan = 'pro'): Promise<void> {
   await ensureUser();
   await request('/upgrade', { method: 'POST', body: JSON.stringify({ plan }) });
+}
+
+export async function createPayment(
+  plan: string,
+  method: 'card' | 'sbp' | 'invoice' = 'card',
+): Promise<Payment> {
+  await ensureUser();
+  return request<Payment>('/payments', {
+    method: 'POST',
+    body: JSON.stringify({ plan, method }),
+  });
+}
+
+export async function confirmPayment(paymentId: string): Promise<void> {
+  await request('/payments/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ payment_id: paymentId }),
+  });
 }
