@@ -184,6 +184,10 @@ def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
         "plan": plan,
         "mode": outcome.mode,
     }
+    # Тема видна всем: она объясняет, по каким правилам шла проверка,
+    # и не раскрывает разбор.
+    if getattr(outcome, "tag", None):
+        base["tag"] = outcome.tag
     if plan not in ("pro", "team"):
         base["upgrade_hint"] = (
             "Разбор — почему такой вердикт, источники и что проверить дальше — "
@@ -195,6 +199,9 @@ def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
     base["sources_used"] = outcome.sources_used
     base["limits"] = outcome.limitations
     base["duration_ms"] = outcome.duration_ms
+    # Рубрика: из чего сложился балл и вердикт. Это и есть платный разбор.
+    if getattr(outcome, "reasoning", None):
+        base["reasoning"] = outcome.reasoning
     return base
 
 

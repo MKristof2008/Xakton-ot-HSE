@@ -23,7 +23,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from . import bank as bank_module
 from . import reputation
+from .reasoning import judge
+from .tags import classify as classify_tag
 from .tariffs import BASE, Tier
 from .sources import (
     CatalogProvider,
@@ -87,9 +90,13 @@ class CheckOutcome:
     sources_used: int = 0
     limitations: list[str] = field(default_factory=list)
     duration_ms: int = 0
+    #: Тема утверждения (система тегов) — от неё зависят правила проверки.
+    tag: dict[str, Any] = field(default_factory=dict)
+    #: Пошаговая цепочка: почему именно такой вердикт и балл.
+    reasoning: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "claims": [c.as_dict() for c in self.claims],
             "verdict": self.verdict,
             "level": self.level,
@@ -100,6 +107,11 @@ class CheckOutcome:
             "limitations": self.limitations,
             "duration_ms": self.duration_ms,
         }
+        if self.tag:
+            out["tag"] = self.tag
+        if self.reasoning:
+            out["reasoning"] = self.reasoning
+        return out
 
 
 # --------------------------------------------------- детерминированный путь
@@ -481,6 +493,30 @@ def llm_enabled() -> bool:
     return bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL"))
 
 
+def _remember(bank: Any, finding: "ClaimFinding", tag_match: Any) -> None:
+    """Запомнить проверенный факт в банке знаний и сохранить файл.
+
+    Пишем только то, что имеет основание: вердикт supported/contradicted
+    и ссылку на источник. Ошибка записи не ломает проверку — банк нужен
+    для ускорения, а не для ответа.
+    """
+    try:
+        saved = bank.learn(
+            finding.text,
+            finding.status,
+            tag=getattr(getattr(tag_match, "tag", None), "key", ""),
+            explanation=finding.explanation,
+            quote=finding.quote,
+            source_title=finding.source_title,
+            source_url=finding.source_url,
+        )
+        if saved is not None:
+            bank.save()
+    except Exception:
+        # Банк не критичен: если диск недоступен, проверка всё равно верна.
+        pass
+
+
 #: Строгий режим: если поиск был, но подтверждений нет — считаем фейком.
 #: Включается STRICT_NOT_FOUND=1 (по умолчанию включён: так просил заказчик).
 #: Отличие от обычного режима только в вердикте, объяснение остаётся честным.
@@ -493,36 +529,58 @@ def _level_for(
     *,
     searched: bool = False,
     strict_allowed: bool = True,
+    sources: int = 0,
+    trusted: int = 0,
+    tag: Any = None,
+    tag_confident: bool = False,
+    kb_hit: bool = False,
+    bank_hit: bool = False,
 ) -> tuple[str, str, int, float]:
     """Уровень, вердикт, балл и неуверенность из набора находок.
 
-    `searched` — были ли источники вообще. Только в этом случае отсутствие
+    Балл берётся не из таблицы «50 по умолчанию», а из рубрики
+    (``reasoning.judge``): цитаты, согласие источников, надёжность доменов,
+    полнота. Поэтому число объяснимо, а при отсутствии данных оно честно
+    низкое, а не нейтральное.
+
+    ``searched`` — были ли источники вообще. Только тогда отсутствие
     подтверждения можно считать признаком выдумки: если искать было негде,
     честный ответ — «непонятно».
     """
     if not findings:
-        return "fog", "непонятно", 50, 1.0
+        return "fog", "непонятно", 0, 1.0
+
+    rubric = judge(
+        claims=findings,
+        sources=sources,
+        trusted=trusted,
+        tag=tag,
+        tag_confident=tag_confident,
+        kb_hit=kb_hit,
+        bank_hit=bank_hit,
+        strict_allowed=strict_allowed,
+    )
+    confidence = rubric.confidence
 
     supported = sum(1 for f in findings if f.status == "supported")
     contradicted = sum(1 for f in findings if f.status == "contradicted")
     unknown = sum(1 for f in findings if f.status == "insufficient")
 
-    # Источник прямо отрицает событие — это фейк, даже если по другим
-    # утверждениям данных нет.
     if contradicted and not supported:
-        return "likely_fake", "фейк", 10, 0.2
+        # Доверие к утверждению — обратная величина уверенности опровержения.
+        return "likely_fake", "фейк", max(0, 100 - confidence), 0.2
     if supported and not contradicted:
-        return "likely_real", "правда", 88, 0.2
+        return "likely_real", "правда", confidence, 0.2
     if supported and contradicted:
-        return "fog", "непонятно", 50, 0.6
+        return "fog", "непонятно", confidence, 0.6
+
+    # Только нехватка данных. Строгий режим может счесть это фейком —
+    # но лишь если поиск состоялся и тема не прогноз.
     if unknown:
-        # Строгий режим: источники проверялись, но ни один не подтвердил.
-        # Тогда считаем фейком — с честным объяснением, что это вывод
-        # из отсутствия подтверждений, а не прямое опровержение.
         if searched and strict_allowed and _strict_not_found():
-            return "likely_fake", "фейк", 25, 0.55
-        return "fog", "непонятно", 50, 0.7
-    return "fog", "непонятно", 50, 0.5
+            return "likely_fake", "фейк", max(0, min(45, confidence)), 0.55
+        return "fog", "непонятно", confidence, 0.7
+    return "fog", "непонятно", confidence, 0.5
 
 
 async def run_check(
@@ -551,7 +609,60 @@ async def run_check(
         cached.duration_ms = int((time.monotonic() - started) * 1000)
         return cached
 
-    # 0. Быстрый путь: проверяем ВЕСЬ текст по базе фактов до всякой модели.
+    # 0. Тема утверждения. Определяется до поиска: от темы зависят правила
+    #    проверки и список приоритетных источников. Без модели — по словам,
+    #    чтобы тег был одинаковым между прогонами и тарифами.
+    tag_match = classify_tag(text)
+
+    # 0a. Банк знаний: то, что система уже проверяла. Точное совпадение
+    #     утверждения даёт готовый ответ без сети — быстро и стабильно.
+    bank = bank_module.shared()
+    bank_entry = bank.lookup(text)
+    if bank_entry is not None:
+        finding = ClaimFinding(
+            text=text[:300],
+            status=bank_entry.status,
+            explanation=bank_entry.explanation
+            or "Утверждение уже проверялось ранее.",
+            quote=bank_entry.quote,
+            source_title=bank_entry.source_title,
+            source_url=bank_entry.source_url,
+            trusted=is_trusted(bank_entry.source_url),
+        )
+        level, verdict, score, uncertainty = _level_for(
+            [finding],
+            searched=True,
+            sources=1,
+            trusted=1 if finding.trusted else 0,
+            tag=tag_match.tag,
+            tag_confident=tag_match.is_confident,
+            bank_hit=True,
+        )
+        reasoning = judge(
+            claims=[finding],
+            sources=1,
+            trusted=1 if finding.trusted else 0,
+            tag=tag_match.tag,
+            tag_confident=tag_match.is_confident,
+            bank_hit=True,
+        )
+        outcome = CheckOutcome(
+            claims=[finding],
+            verdict=verdict,
+            level=level,
+            score=score,
+            uncertainty=uncertainty,
+            mode="bank",
+            sources_used=1,
+            limitations=[],
+            tag=tag_match.as_dict(),
+            reasoning=reasoning.as_dict(),
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        _cache_put(text, outcome, tier.key, url)
+        return outcome
+
+    # 1. Курируемая база фактов — проверка до всякой модели.
     #    Так результат стабилен (модель не переформулирует утверждение в
     #    неузнаваемое) и быстр (0 вызовов модели на известных фактах).
     kb_direct = _judge_with_kb(text)
@@ -562,8 +673,24 @@ async def run_check(
         # утверждение нельзя подтверждать одной записью.
         kb_direct = _apply_text_guards(text, kb_direct)
         if kb_direct.status in ("supported", "contradicted"):
-            level, verdict, score, uncertainty = _level_for([kb_direct], searched=True)
-            return CheckOutcome(
+            level, verdict, score, uncertainty = _level_for(
+                [kb_direct],
+                searched=True,
+                sources=1,
+                trusted=1 if kb_direct.trusted else 0,
+                tag=tag_match.tag,
+                tag_confident=tag_match.is_confident,
+                kb_hit=True,
+            )
+            reasoning = judge(
+                claims=[kb_direct],
+                sources=1,
+                trusted=1 if kb_direct.trusted else 0,
+                tag=tag_match.tag,
+                tag_confident=tag_match.is_confident,
+                kb_hit=True,
+            )
+            outcome = CheckOutcome(
                 claims=[kb_direct],
                 verdict=verdict,
                 level=level,
@@ -572,8 +699,13 @@ async def run_check(
                 mode="offline",
                 sources_used=1,
                 limitations=list(kb_direct.limitations),
+                tag=tag_match.as_dict(),
+                reasoning=reasoning.as_dict(),
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
+            _remember(bank, kb_direct, tag_match)
+            _cache_put(text, outcome, tier.key, url)
+            return outcome
 
     # 1. Утверждения
     claims: list[str] = []
@@ -799,7 +931,13 @@ async def run_check(
     # «завтра ожидается снег» — не фейк, даже если подтверждения нет.
     strict_allowed = not _is_future(text) and not _is_vague(text)
     level, verdict, score, uncertainty = _level_for(
-        findings, searched=bool(evidence_sources), strict_allowed=strict_allowed
+        findings,
+        searched=bool(evidence_sources),
+        strict_allowed=strict_allowed,
+        sources=len(sources),
+        trusted=len(evidence_sources),
+        tag=tag_match.tag,
+        tag_confident=tag_match.is_confident,
     )
     limitations = [lim for f in findings for lim in f.limitations]
     # Понятная причина «непонятно»: пользователь должен знать, почему
@@ -838,6 +976,17 @@ async def run_check(
             "Модель не ответила — вердикт по детерминированной проверке."
         )
 
+    reasoning = judge(
+        claims=findings,
+        sources=len(sources),
+        trusted=len(evidence_sources),
+        tag=tag_match.tag,
+        tag_confident=tag_match.is_confident,
+        kb_hit=False,
+        bank_hit=False,
+        strict_allowed=strict_allowed,
+    )
+
     outcome = CheckOutcome(
         claims=findings,
         verdict=verdict,
@@ -847,7 +996,13 @@ async def run_check(
         mode=mode,
         sources_used=len(sources),
         limitations=limitations,
+        tag=tag_match.as_dict(),
+        reasoning=reasoning.as_dict(),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
+    # Проверенный факт уходит в банк знаний: в следующий раз ответ будет
+    # быстрее и стабильнее, а модель учится на собственных подтверждениях.
+    for finding in findings:
+        _remember(bank, finding, tag_match)
     _cache_put(text, outcome, tier.key, url)
     return outcome

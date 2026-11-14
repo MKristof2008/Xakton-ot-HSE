@@ -1136,8 +1136,7 @@ dt {
   gap: 10px;
 }
 
-/* Что делать и готовая пересылка: появляются с тарифа «Плюс» и «Макс». */
-.signal__action {
+/* Что делать и готовая пересылка: появляются с тарифа «Плюс» и «Макс». */.signal__action {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -1170,6 +1169,137 @@ dt {
   font-size: 14px;
   line-height: 1.55;
   color: var(--ink);
+}
+
+/* ------------------------------------------------- рубрика рассуждения */
+
+.reasoning {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.reasoning__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.reasoning__score {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.reasoning__of {
+  font-size: 14px;
+  color: var(--faint);
+}
+
+.reasoning__tag,
+.reasoning__rules {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.reasoning__tag-label {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.reasoning__tag-hits {
+  color: var(--faint);
+}
+
+.reasoning__summary {
+  margin: 0 0 18px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.reasoning__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reasoning__item {
+  padding: 14px 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.reasoning__item--warn {
+  border-color: var(--line-strong);
+}
+
+.reasoning__item--bad {
+  border-color: var(--bad);
+}
+
+.reasoning__item-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.reasoning__item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.reasoning__points {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.reasoning__reason {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.reasoning__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.reasoning__bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink);
+  transition: width var(--dur-2) var(--ease-out);
+}
+
+.reasoning__item--warn .reasoning__bar-fill {
+  background: var(--muted);
+}
+
+.reasoning__item--bad .reasoning__bar-fill {
+  background: var(--bad);
 }
 
 .signal__strength {

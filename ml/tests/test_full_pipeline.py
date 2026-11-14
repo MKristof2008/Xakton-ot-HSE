@@ -128,15 +128,40 @@ def test_negation_detected():
 # ------------------------------------------------------------ уровень
 
 def test_level_all_supported():
-    level, verdict, score, _ = _level_for([ClaimFinding(text="a", status="supported")])
+    """Подтверждение с цитатой и доверенным источником — высокий балл.
+
+    Балл теперь считается по рубрике, поэтому проверяем именно полный
+    набор доказательств: без них вердикт тот же, но цифра честно низкая
+    (см. test_level_supported_without_evidence_is_low).
+    """
+    finding = ClaimFinding(
+        text="a", status="supported", quote="дословная цитата", trusted=True
+    )
+    level, verdict, score, _ = _level_for(
+        [finding], sources=2, trusted=1, searched=True
+    )
     assert (level, verdict) == ("likely_real", "правда")
-    assert score >= 80
+    assert score >= 70
+
+
+def test_level_supported_without_evidence_is_low():
+    """«Правда» без цитаты и источников не может давать высокую уверенность."""
+    level, verdict, score, _ = _level_for(
+        [ClaimFinding(text="a", status="supported")]
+    )
+    assert (level, verdict) == ("likely_real", "правда")
+    assert score < 50
 
 
 def test_level_all_contradicted():
-    level, verdict, score, _ = _level_for([ClaimFinding(text="a", status="contradicted")])
+    finding = ClaimFinding(
+        text="a", status="contradicted", quote="источник отрицает", trusted=True
+    )
+    level, verdict, score, _ = _level_for(
+        [finding], sources=2, trusted=1, searched=True
+    )
     assert (level, verdict) == ("likely_fake", "фейк")
-    assert score <= 20
+    assert score <= 40
 
 
 def test_level_conflict_is_fog():

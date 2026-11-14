@@ -15,6 +15,7 @@ import {
 import { formatDate } from '../lib/formatDate';
 import { safeHttpUrl } from '../lib/safeUrl';
 import { plural } from '../lib/plural';
+import { ReasoningBlock } from './ReasoningBlock';
 
 interface Props {
   result: CheckResponse;
@@ -85,6 +86,12 @@ export function VerdictCard({ result, onUpgraded }: Props) {
         <Paywall onUpgraded={onUpgraded} />
       ) : (
         <Breakdown result={result} />
+      )}
+
+      {/* Рубрика: из чего сложился вердикт и балл. Показывается по подписке —
+          это и есть тот «разбор», за который платят. */}
+      {result.plan !== 'free' && result.reasoning && (
+        <ReasoningBlock reasoning={result.reasoning} tag={result.tag} />
       )}
 
       {result.explanation && (

@@ -16,3 +16,7 @@ frontend/dist/
 # локальные артефакты прогонов: журналы модели, обратная связь, индексы
 ml/*.jsonl
 ml/**/*.joblib
+
+# банк знаний пополняется при проверках: в git едет только пустой шаблон
+ml/lakmus/data/knowledge_bank.json
+ml/lakmus/data/.bank-*.tmp

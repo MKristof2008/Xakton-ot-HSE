@@ -60,6 +60,37 @@ export interface CheckResponse {
   explanation?: string;
   explanation_source?: 'model' | 'detectors';
   model_verdict?: 'real' | 'fake' | 'unclear';
+  /** Тема утверждения: к какому классу отнесено и почему. */
+  tag?: TagInfo;
+  /** Рубрика: из чего сложился балл доверия. */
+  reasoning?: Reasoning;
+}
+
+export interface TagInfo {
+  key: string;
+  title: string;
+  score?: number;
+  hits?: string[];
+  risk?: number;
+  rules?: string[];
+}
+
+export interface Reasoning {
+  confidence: number;
+  verdict: string;
+  summary: string;
+  tag?: { key: string; title: string };
+  rules_applied?: string[];
+  criteria: ReasoningCriterion[];
+}
+
+export interface ReasoningCriterion {
+  key: string;
+  title: string;
+  points: number;
+  max_points: number;
+  reason: string;
+  tone: 'ok' | 'warn' | 'bad';
 }
 
 export interface ClaimFinding {
