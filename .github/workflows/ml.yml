@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-test.txt
       - name: Run ML tests
-        # pytest-asyncio регистрирует маркер asyncio. Без него pytest выдаёт
-        # предупреждения и может пропустить async-тесты в будущих версиях.
+        # pytest.ini объявляет маркер asyncio: async-тесты запускает хук
+        # из ml/conftest.py, плагин pytest-asyncio не нужен.
         run: |
           python -m pytest ml -q
