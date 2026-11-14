@@ -146,6 +146,29 @@ def verdict_of(result: Any) -> str:
     return "непонятно"
 
 
+def _detector_explanation(result: Any) -> str:
+    """Объяснение вердикта по медиа без модели: собираем из сигналов.
+
+    Модель переводит отчёт детекторов на человеческий язык, но её может не
+    быть. Тогда объяснение всё равно нужно: вердикт без обоснования — это
+    ровно то, за что ругают «нейросеть сказала».
+    """
+    parts: list[str] = []
+    for signal in result.signals or []:
+        verdict = getattr(getattr(signal, "verdict", None), "value", "")
+        if verdict in ("supports_fake", "supports_real"):
+            parts.append(str(signal.summary or "").strip())
+    if not parts:
+        parts = [
+            str(s.summary or "").strip()
+            for s in (result.signals or [])
+            if getattr(s, "summary", "")
+        ][:2]
+    if not parts:
+        return "Признаков для вывода не нашлось: данных слишком мало."
+    return " ".join(p for p in parts[:3] if p)[:600]
+
+
 def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
     """Ответ по тарифу из результата полного пайплайна."""
     base: dict[str, Any] = {
@@ -350,6 +373,10 @@ async def check_text(
                 if plan in ("pro", "team"):
                     payload["model_verdict"] = media_note["verdict"]
             else:
+                # Модели нет или она промолчала — объясняем детерминированно.
+                # Пустой explanation ломает и интерфейс, и паспорт: человек
+                # видит вердикт без единого слова обоснования.
+                payload["explanation"] = _detector_explanation(result)
                 payload["explanation_source"] = "detectors"
 
             store.save_check(
