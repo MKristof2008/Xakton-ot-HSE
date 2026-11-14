@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -55,6 +55,8 @@ from quote_page import build_page as build_quote_page  # noqa: E402
 from sources_page import load_topics, page_html as sources_page_html  # noqa: E402
 
 MAX_TEXT = 4000
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 
 app = FastAPI(title="Ревизор — фактчекинг API")
 
@@ -85,7 +87,9 @@ async def not_found(request: Request, exc: Any) -> JSONResponse:
 # ---------- модели ----------
 
 class CheckRequest(BaseModel):
-    text: str = Field(..., max_length=MAX_TEXT)
+    text: str = Field(default="", max_length=MAX_TEXT)
+    # Ссылка из мессенджера или браузера: скачаем страницу и проверим её.
+    url: Optional[str] = None
 
 
 class UpgradeRequest(BaseModel):
@@ -217,12 +221,49 @@ async def health() -> dict[str, Any]:
 
 @app.post("/api/check")
 async def check_text(
-    req: CheckRequest,
+    request: Request,
     x_token: Optional[str] = Header(default=None, alias="X-Token"),
 ) -> Any:
-    """Проверить утверждение. Free — вердикт, pro — полный разбор."""
-    text = (req.text or "").strip()
-    if len(text) < 8:
+    """Проверить утверждение. Free — вердикт, pro — полный разбор.
+
+    Принимает JSON (текст и/или ссылка) и multipart с картинкой: скриншот
+    из мессенджера — самый частый материал, который присылают на проверку.
+    """
+    image: Optional[bytes] = None
+    image_name = ""
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        text = str(form.get("text") or "")
+        url = str(form.get("url") or "") or None
+        upload = form.get("image")
+        if upload is not None and not isinstance(upload, str):
+            if (upload.content_type or "") not in IMAGE_TYPES:
+                return fail(
+                    "BAD_INPUT",
+                    "картинка должна быть PNG, JPEG, WebP или GIF",
+                    422,
+                )
+            image = await upload.read()
+            image_name = upload.filename or "screenshot"
+            if len(image) > MAX_IMAGE_BYTES:
+                return fail("BAD_INPUT", "картинка больше 8 МБ", 422)
+            if not image:
+                return fail("BAD_INPUT", "пустой файл", 422)
+    else:
+        try:
+            req = CheckRequest(**(await request.json()))
+        except Exception:
+            return fail("BAD_INPUT", "не разобрал тело запроса", 422)
+        text = req.text
+        url = req.url
+
+    text = (text or "").strip()
+    url = (url or "").strip() or None
+    if url and not url.startswith(("http://", "https://")):
+        return fail("BAD_INPUT", "ссылка должна начинаться с http:// или https://", 422)
+    if not image and not url and len(text) < 8:
         return fail("BAD_INPUT", "слишком короткий текст: нужно хотя бы 8 символов", 422)
     if len(text) > MAX_TEXT:
         return fail("BAD_INPUT", f"текст длиннее {MAX_TEXT} символов", 422)
@@ -239,27 +280,50 @@ async def check_text(
 
     check_id = f"chk_{int(time.time() * 1000) % 10**10:010d}"
     try:
-        # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
-        # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
-        outcome = await run_full_check(text)
+        if image:
+            # Картинка: сигналы изображения — метаданные, следы генерации,
+            # монтаж, контекст публикации. Текст со скриншота идёт в OCR.
+            ctx = CheckContext(
+                check_id=check_id,
+                input=CheckInput(type=InputType.image, filename=image_name),
+                data=image,
+                text=text,
+            )
+            result = await run_check(ctx)
+            payload = public_payload(result, check_id, plan)
+            subject = text or f"[изображение] {image_name}"
+            store.save_check(
+                text=subject,
+                verdict=payload["verdict"],
+                score=result.trust.score,
+                uncertainty=result.trust.uncertainty,
+                level=result.trust.level.value,
+                full=public_payload(result, check_id, "pro"),
+                user_id=user["id"] if user else None,
+            )
+        else:
+            # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
+            # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
+            outcome = await run_full_check(text, url=url)
+            payload = outcome_payload(outcome, check_id, plan)
+            subject = text or (url or "")
+            # В базу всегда кладём полный разбор, независимо от тарифа: он нужен
+            # публичному паспорту и повторному открытию по подписке. Тариф
+            # ограничивает только ответ API, а не хранение.
+            store.save_check(
+                text=subject,
+                verdict=payload["verdict"],
+                score=outcome.score,
+                uncertainty=outcome.uncertainty,
+                level=outcome.level,
+                full=outcome_payload(outcome, check_id, "pro"),
+                user_id=user["id"] if user else None,
+            )
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
 
-    payload = outcome_payload(outcome, check_id, plan)
-    # В базу всегда кладём полный разбор, независимо от тарифа: он нужен
-    # публичному паспорту и повторному открытию по подписке. Тариф
-    # ограничивает только ответ API, а не хранение.
-    store.save_check(
-        text=text,
-        verdict=payload["verdict"],
-        score=outcome.score,
-        uncertainty=outcome.uncertainty,
-        level=outcome.level,
-        full=outcome_payload(outcome, check_id, "pro"),
-        user_id=user["id"] if user else None,
-    )
     # Постоянная ссылка на паспорт: одна на утверждение, живёт после закрытия.
-    payload["passport"] = f"/p/{store.text_hash(text)}"
+    payload["passport"] = f"/p/{store.text_hash(subject)}"
     if user:
         payload["quota_left"] = store.free_quota_left(user["id"]) if plan == "free" else None
     return payload

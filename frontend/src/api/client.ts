@@ -51,7 +51,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const token = readToken();
   if (token) headers.set('X-Token', token);
-  if (init?.body && !headers.has('Content-Type')) {
+  if (init?.body && !headers.has('Content-Type') && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -88,11 +88,22 @@ export async function getMe(): Promise<Me> {
   return request<Me>('/me');
 }
 
-export async function runCheck(text: string): Promise<CheckResponse> {
+/** Проверка текста, ссылки или скриншота. Все три входа — один контракт. */
+export async function runCheck(
+  text: string,
+  extra: { url?: string; image?: File } = {},
+): Promise<CheckResponse> {
   await ensureUser();
+  if (extra.image) {
+    const body = new FormData();
+    if (text) body.append('text', text);
+    if (extra.url) body.append('url', extra.url);
+    body.append('image', extra.image);
+    return request<CheckResponse>('/check', { method: 'POST', body });
+  }
   return request<CheckResponse>('/check', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, url: extra.url || undefined }),
   });
 }
 

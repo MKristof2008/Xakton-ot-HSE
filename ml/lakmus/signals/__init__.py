@@ -53,8 +53,19 @@ SIGNALS: dict[str, list[type]] = {
 
 
 def default_signals(input_type: InputType | str) -> list[Signal]:
-    """Возвращает список экземпляров сигналов для данного типа входа."""
-    classes = SIGNALS.get(str(input_type).lower().split("/")[-1], SIGNALS["text"])
+    """Возвращает список экземпляров сигналов для данного типа входа.
+
+    У `InputType` (str, Enum) обычный ``str()`` даёт «InputType.image»,
+    а не «image»: брать нужно ``.value``, иначе картинка получает
+    текстовые сигналы и все они честно отвечают «unavailable».
+
+    Принимает и MIME-тип («image/png»): категория там — первая часть.
+    """
+    raw = getattr(input_type, "value", input_type)
+    key = str(raw).strip().lower()
+    if "/" in key:
+        key = key.split("/", 1)[0]
+    classes = SIGNALS.get(key, SIGNALS["text"])
     return [cls() for cls in classes]
 
 

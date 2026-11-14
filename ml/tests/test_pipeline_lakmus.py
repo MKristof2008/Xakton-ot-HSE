@@ -32,8 +32,30 @@ async def test_pipeline_image_returns_check_result():
     result = await check(ctx)
     assert isinstance(result, CheckResult)
     assert result.input.type == InputType.image
-    assert len(result.signals) == 6
+    # Картинку проверяют сигналы изображения, а не текстовые: раньше
+    # InputType.image превращался в строку «InputType.image», и набор
+    # сигналов молча откатывался к текстовому.
+    ids = {s.id for s in result.signals}
+    assert ids == {"metadata", "ai_artifacts", "manipulation", "source_search", "screenshot"}
+    assert not ids & {"claims", "kb_facts", "quotes"}
     assert result.trust.uncertainty >= 0
+
+
+def test_default_signals_respects_input_type_enum():
+    from lakmus.signals import default_signals
+
+    image = {type(s).__name__ for s in default_signals(InputType.image)}
+    text = {type(s).__name__ for s in default_signals(InputType.text)}
+    url = {type(s).__name__ for s in default_signals(InputType.url)}
+
+    assert image == {"MetadataSignal", "AIArtifactsSignal", "ManipulationSignal",
+                     "SourceSearchSignal", "ScreenshotSignal"}
+    assert text == {"ClaimsSignal", "KbFactsSignal", "SourcesSignal", "QuotesSignal",
+                    "RhetoricSignal", "MachineTextSignal"}
+    # Строка вместо enum тоже должна работать — backend может передать её.
+    assert {type(s).__name__ for s in default_signals("image")} == image
+    assert {type(s).__name__ for s in default_signals("image/png")} == image
+    assert len(url) == 6
 
 
 @pytest.mark.asyncio
