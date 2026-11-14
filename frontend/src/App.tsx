@@ -4,7 +4,7 @@ import type { Me } from './types';
 import { hashFor, readTab } from './lib/tabs';
 import type { Tab } from './lib/tabs';
 import { Header } from './components/Header';
-import { AuthScreen } from './components/AuthScreen';
+import { AuthDialog } from './components/AuthDialog';
 import { Footer } from './components/Footer';
 import { CheckScreen } from './components/CheckScreen';
 import { HistoryScreen } from './components/HistoryScreen';
@@ -15,6 +15,9 @@ import './styles/global.css';
 export default function App() {
   const [tab, setTab] = useState<Tab>(readTab);
   const [me, setMe] = useState<Me | null>(null);
+  // Вход открывается по требованию: при попытке проверки или оплаты.
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authReason, setAuthReason] = useState<string>('');
   // Три состояния входа: проверяем сессию → гость → пользователь.
   const [authChecked, setAuthChecked] = useState(false);
 
@@ -33,6 +36,11 @@ export default function App() {
       .then(setMe)
       .catch(() => setMe(null))
       .finally(() => setAuthChecked(true));
+  }, []);
+
+  const requestAuth = useCallback((reason: string) => {
+    setAuthReason(reason);
+    setAuthOpen(true);
   }, []);
 
   const go = useCallback((next: Tab) => {
@@ -54,30 +62,41 @@ export default function App() {
     return <div className="app app--boot" aria-busy="true" />;
   }
 
-  // Без аккаунта проверки недоступны: лимиты и подписка живут в профиле.
-  if (!me) {
-    return (
-      <div className="app">
-        <AuthScreen onAuth={(user) => setMe(user)} />
-      </div>
-    );
-  }
-
+  // Гость видит сайт целиком: может читать, вводить текст и нажимать
+  // «Проверить». Вход спрашивается только в момент проверки — это
+  // конверсионно лучше, чем стена логина на входе.
   return (
     <div className="app">
       <a className="skip" href="#content">
         К содержимому
       </a>
-      <Header tab={tab} me={me} onNavigate={go} onLogout={() => setMe(null)} />
+      <Header
+        tab={tab}
+        me={me}
+        onNavigate={go}
+        onLogout={() => setMe(null)}
+        onNeedAuth={requestAuth}
+      />
 
       <main className="main" id="content">
-        {tab === 'check' && <CheckScreen me={me} onMe={setMe} />}
+        {tab === 'check' && <CheckScreen me={me} onMe={setMe} onNeedAuth={requestAuth} />}
         {tab === 'history' && <HistoryScreen />}
         {tab === 'top' && <TopScreen />}
-        {tab === 'plans' && <PlansScreen me={me} onMe={setMe} />}
+        {tab === 'plans' && <PlansScreen me={me} onMe={setMe} onNeedAuth={requestAuth} />}
       </main>
 
       <Footer />
+
+      {authOpen && (
+        <AuthDialog
+          reason={authReason}
+          onClose={() => setAuthOpen(false)}
+          onAuth={(user) => {
+            setMe(user);
+            setAuthOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

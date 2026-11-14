@@ -7,11 +7,13 @@ import type { Me, PlanInfo, PricingResponse } from '../types';
 interface Props {
   me: Me | null;
   onMe: (me: Me) => void;
+  /** Попросить войти перед оплатой. */
+  onNeedAuth?: (reason: string) => void;
 }
 
 const PLAN_ORDER: Record<string, number> = { free: 0, pro: 1, team: 2 };
 
-export function PlansScreen({ me, onMe }: Props) {
+export function PlansScreen({ me, onMe, onNeedAuth }: Props) {
   const [plans, setPlans] = useState<PlanInfo[] | null>(null);
   const [note, setNote] = useState('');
   const [trial, setTrial] = useState<PricingResponse['trial'] | null>(null);
@@ -50,6 +52,10 @@ export function PlansScreen({ me, onMe }: Props) {
 
   function pick(plan: PlanInfo) {
     if (plan.id === 'free') return;
+    if (!me && onNeedAuth) {
+      onNeedAuth('Чтобы оформить подписку, войдите или создайте аккаунт.');
+      return;
+    }
     setError(null);
     setPaying(plan);
   }

@@ -2627,3 +2627,22 @@ dt {
     display: none;
   }
 }
+
+/* окно входа поверх сайта */
+.auth-dialog {
+  width: min(420px, 100%);
+}
+
+.auth-dialog__reason {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 42ch;
+}
+
+.header__login {
+  padding: 7px 16px;
+  font-size: 13.5px;
+  white-space: nowrap;
+}

@@ -16,9 +16,10 @@ interface Props {
   me: Me | null;
   onNavigate: (tab: Tab) => void;
   onLogout: () => void;
+  onNeedAuth: (reason: string) => void;
 }
 
-export function Header({ tab, me, onNavigate, onLogout }: Props) {
+export function Header({ tab, me, onNavigate, onLogout, onNeedAuth }: Props) {
   const paid = me?.plan === 'pro' || me?.plan === 'team';
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -51,6 +52,17 @@ export function Header({ tab, me, onNavigate, onLogout }: Props) {
           ))}
         </nav>
 
+        {!me && (
+          <button
+            type="button"
+            className="btn btn--ghost header__login"
+            onClick={() => onNeedAuth('Войдите, чтобы проверять сообщения и видеть свою историю.')}
+          >
+            Войти
+          </button>
+        )}
+
+        {me && (
         <div className="account">
           <button
             type="button"
@@ -101,6 +113,7 @@ export function Header({ tab, me, onNavigate, onLogout }: Props) {
             </>
           )}
         </div>
+        )}
       </div>
     </header>
   );
