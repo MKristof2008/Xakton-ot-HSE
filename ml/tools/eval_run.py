@@ -140,6 +140,8 @@ async def main() -> None:
     parser.add_argument("--json", action="store_true", help="сохранить отчёт в файл")
     args = parser.parse_args()
 
+    # Строгий режим включается переменной STRICT_NOT_FOUND, по умолчанию он
+    # уже включён в самом пайплайне.
     if not args.with_llm:
         # Офлайн-режим: только база. Ключи не загружаем, чтобы прогон был
         # быстрым и детерминированным.

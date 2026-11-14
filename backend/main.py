@@ -86,6 +86,9 @@ async def not_found(request: Request, exc: Any) -> JSONResponse:
 
 class CheckRequest(BaseModel):
     text: str = Field(..., max_length=MAX_TEXT)
+    #: Ссылка на проверяемую страницу. Нужна, чтобы распознать
+    #: сатирический или недостоверный сайт до всякой модели.
+    url: Optional[str] = None
 
 
 class UpgradeRequest(BaseModel):
@@ -137,6 +140,16 @@ def verdict_of(result: Any) -> str:
     if level in ("likely_fake", "doubtful"):
         return "фейк"
     return "непонятно"
+
+
+def _clean_url(value: Optional[str]) -> Optional[str]:
+    """Проверить, что ссылка выглядит как http(s), иначе не использовать."""
+    if not value:
+        return None
+    candidate = value.strip()
+    if not re.match(r"^https?://[^\s]+$", candidate, re.I):
+        return None
+    return candidate[:2000]
 
 
 def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
@@ -261,7 +274,7 @@ async def check_text(
     try:
         # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
         # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
-        outcome = await run_full_check(text)
+        outcome = await run_full_check(text, url=_clean_url(req.url))
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
         return fail("CHECK_FAILED", f"проверка не удалась: {type(exc).__name__}", 502)
 
