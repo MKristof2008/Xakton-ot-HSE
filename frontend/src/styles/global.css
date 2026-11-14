@@ -2272,3 +2272,263 @@ dt {
     animation: none;
   }
 }
+
+/* ======================================================== вход и аккаунт */
+
+.auth {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 460px) minmax(0, 1fr);
+  gap: 0;
+  background: var(--bg);
+}
+
+@media (max-width: 900px) {
+  .auth {
+    grid-template-columns: 1fr;
+  }
+  .auth__side {
+    display: none;
+  }
+}
+
+.auth__panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px max(24px, env(safe-area-inset-left, 0px)) 48px 24px;
+  max-width: 460px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.auth__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 18px;
+}
+
+.auth__dot {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  position: relative;
+}
+
+.auth__dot::after {
+  content: '';
+  position: absolute;
+  inset: 3.5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.auth__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 36px);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.auth__lead {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+  max-width: 46ch;
+}
+
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth__label {
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.auth__submit {
+  margin-top: 6px;
+  padding: 12px;
+  width: 100%;
+}
+
+.auth__switch {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.auth__switch button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.auth__note {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.55;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.auth__side {
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  padding: 48px 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+
+.auth__features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 40ch;
+}
+
+.auth__features li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auth__features strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.auth__features span {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* загрузка сессии — пусто, без мигания */
+.app--boot {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+/* меню аккаунта */
+.account {
+  position: relative;
+}
+
+.account__btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.account__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.account__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.account__menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 31;
+  width: 230px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.5);
+  animation: pay-in 180ms var(--ease-out);
+}
+
+.account__who {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+
+.account__who strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.account__who span {
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.account__row {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.account__logout {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--bad);
+  margin-top: 4px;
+}
+
+.account__logout:hover {
+  background: var(--surface-2);
+}
+
+@media (max-width: 620px) {
+  .account__avatar {
+    display: none;
+  }
+}

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getMe } from './api/client';
+import { getMe, hasSession } from './api/client';
 import type { Me } from './types';
 import { hashFor, readTab } from './lib/tabs';
 import type { Tab } from './lib/tabs';
 import { Header } from './components/Header';
+import { AuthScreen } from './components/AuthScreen';
 import { Footer } from './components/Footer';
 import { CheckScreen } from './components/CheckScreen';
 import { TopScreen } from './components/TopScreen';
@@ -13,6 +14,8 @@ import './styles/global.css';
 export default function App() {
   const [tab, setTab] = useState<Tab>(readTab);
   const [me, setMe] = useState<Me | null>(null);
+  // Три состояния входа: проверяем сессию → гость → пользователь.
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     const onHash = () => setTab(readTab());
@@ -21,9 +24,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!hasSession()) {
+      setAuthChecked(true);
+      return;
+    }
     getMe()
       .then(setMe)
-      .catch(() => setMe(null));
+      .catch(() => setMe(null))
+      .finally(() => setAuthChecked(true));
   }, []);
 
   const go = useCallback((next: Tab) => {
@@ -40,12 +48,26 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  // Пока проверяем сессию — тишина вместо мигания формы входа.
+  if (!authChecked) {
+    return <div className="app app--boot" aria-busy="true" />;
+  }
+
+  // Без аккаунта проверки недоступны: лимиты и подписка живут в профиле.
+  if (!me) {
+    return (
+      <div className="app">
+        <AuthScreen onAuth={(user) => setMe(user)} />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <a className="skip" href="#content">
         К содержимому
       </a>
-      <Header tab={tab} me={me} onNavigate={go} />
+      <Header tab={tab} me={me} onNavigate={go} onLogout={() => setMe(null)} />
 
       <main className="main" id="content">
         {tab === 'check' && <CheckScreen me={me} onMe={setMe} />}

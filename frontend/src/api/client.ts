@@ -78,10 +78,48 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Гостевой пользователь: создаётся один раз и живёт в localStorage. */
-export async function ensureUser(): Promise<void> {
-  if (readToken()) return;
-  const user = await request<{ id: string; token: string }>('/users', { method: 'POST' });
+export async function register(
+  email: string,
+  password: string,
+  name = '',
+): Promise<Me> {
+  const user = await request<Me & { token: string }>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, name }),
+  });
   writeToken(user.token);
+  return user;
+}
+
+export async function login(email: string, password: string): Promise<Me> {
+  const user = await request<Me & { token: string }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  writeToken(user.token);
+  return user;
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await request('/auth/logout', { method: 'POST' });
+  } catch {
+    /* сервер недоступен — токен всё равно убираем локально */
+  }
+  clearToken();
+}
+
+export function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* приватный режим */
+  }
+}
+
+/** Есть ли сохранённая сессия. Без неё интерфейс показывает вход. */
+export function hasSession(): boolean {
+  return Boolean(readToken());
 }
 
 export async function getMe(): Promise<Me> {
@@ -89,7 +127,6 @@ export async function getMe(): Promise<Me> {
 }
 
 export async function runCheck(text: string): Promise<CheckResponse> {
-  await ensureUser();
   return request<CheckResponse>('/check', {
     method: 'POST',
     body: JSON.stringify({ text }),
@@ -109,7 +146,6 @@ export async function getPricing(): Promise<PricingResponse> {
 }
 
 export async function upgrade(plan = 'pro'): Promise<void> {
-  await ensureUser();
   await request('/upgrade', { method: 'POST', body: JSON.stringify({ plan }) });
 }
 
@@ -117,7 +153,6 @@ export async function createPayment(
   plan: string,
   method: 'card' | 'sbp' | 'invoice' = 'card',
 ): Promise<Payment> {
-  await ensureUser();
   return request<Payment>('/payments', {
     method: 'POST',
     body: JSON.stringify({ plan, method }),
