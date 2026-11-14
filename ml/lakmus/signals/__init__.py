@@ -24,6 +24,8 @@ from .source_search import SourceSearchSignal
 from .text_claims import ClaimsSignal
 from .text_sources import SourcesSignal
 from .machine_text import MachineTextSignal
+from .uniqueness import UniquenessSignal
+from .pricing import PricingSignal
 
 SIGNALS: dict[str, list[type]] = {
     "image": [
@@ -32,6 +34,8 @@ SIGNALS: dict[str, list[type]] = {
         ManipulationSignal,
         SourceSearchSignal,
         ScreenshotSignal,
+        UniquenessSignal,
+        PricingSignal,
     ],
     "text": [
         ClaimsSignal,
@@ -53,8 +57,18 @@ SIGNALS: dict[str, list[type]] = {
 
 
 def default_signals(input_type: InputType | str) -> list[Signal]:
-    """Возвращает список экземпляров сигналов для данного типа входа."""
-    classes = SIGNALS.get(str(input_type).lower().split("/")[-1], SIGNALS["text"])
+    """Возвращает список экземпляров сигналов для данного типа входа.
+
+    `str(InputType.image)` в Python 3.11+ даёт «InputType.image», а не
+    «image» — поэтому берём `.value`, иначе изображения получали текстовый
+    набор сигналов и проверка фото не работала вовсе.
+    """
+    raw = getattr(input_type, "value", input_type)
+    key = str(raw).lower()
+    # MIME-тип «image/jpeg» → «image»
+    if "/" in key:
+        key = key.split("/")[0]
+    classes = SIGNALS.get(key, SIGNALS["text"])
     return [cls() for cls in classes]
 
 

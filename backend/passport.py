@@ -50,16 +50,25 @@ def passport_html(
     """Полная HTML-страница паспорта."""
     color, bg, icon, label = _level_style(level)
 
-    # Цитата-основание: первая найденная в проверке.
+    # Цитата-основание и подпись блока зависят от того, что она делает:
+    # подтверждает или опровергает. Называть опровержение «чем подтверждено» —
+    # значит врать в самом заметном месте карточки.
     quote = ""
     source_title = ""
     source_url = ""
+    evidence_label = "Чем подтверждено"
     for claim in claims:
-        if claim.get("quote"):
-            quote = str(claim["quote"])
-            source_title = str(claim.get("source_title") or "")
-            source_url = str(claim.get("source_url") or "")
-            break
+        if not claim.get("quote"):
+            continue
+        quote = str(claim["quote"])
+        source_title = str(claim.get("source_title") or "")
+        source_url = str(claim.get("source_url") or "")
+        status = str(claim.get("status", ""))
+        if status == "contradicted":
+            evidence_label = "Чем опровергнуто"
+        elif status == "context":
+            evidence_label = "Что уточняет источник"
+        break
 
     preview_text = text[:PREVIEW_CHARS] + ("…" if len(text) > PREVIEW_CHARS else "")
     title = f"{label}: {preview_text}"
@@ -109,7 +118,7 @@ def passport_html(
         )
         quote_html = f"""
       <section class="quote-block">
-        <p class="eyebrow">Чем подтверждено</p>
+        <p class="eyebrow">{_esc(evidence_label)}</p>
         <blockquote>{_esc(quote)}</blockquote>
         {link}
         {quote_link}
