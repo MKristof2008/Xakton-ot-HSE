@@ -90,13 +90,27 @@ async def not_found(request: Request, exc: Any) -> JSONResponse:
 # ---------- модели ----------
 
 class CheckRequest(BaseModel):
+    # Текст необязателен: проверять можно и одну ссылку, и один скриншот.
     text: str = Field(default="", max_length=MAX_TEXT)
-    # Ссылка из мессенджера или браузера: скачаем страницу и проверим её.
+    #: Ссылка на проверяемую страницу. Нужна и чтобы скачать страницу для
+    #: проверки, и чтобы распознать сатирический или недостоверный сайт
+    #: до всякой модели.
     url: Optional[str] = None
 
 
 class UpgradeRequest(BaseModel):
     plan: str = "pro"
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 class PaymentRequest(BaseModel):
@@ -144,6 +158,16 @@ def verdict_of(result: Any) -> str:
     if level in ("likely_fake", "doubtful"):
         return "фейк"
     return "непонятно"
+
+
+def _clean_url(value: Optional[str]) -> Optional[str]:
+    """Проверить, что ссылка выглядит как http(s), иначе не использовать."""
+    if not value:
+        return None
+    candidate = value.strip()
+    if not re.match(r"^https?://[^\s]+$", candidate, re.I):
+        return None
+    return candidate[:2000]
 
 
 def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
@@ -306,10 +330,20 @@ async def check_text(
     if len(text) > MAX_TEXT:
         return fail("BAD_INPUT", f"текст длиннее {MAX_TEXT} символов", 422)
 
+    # Без аккаунта проверок нет: лимиты, тариф и история платежей живут
+    # в профиле. Гостевой доступ давал бы бесконечные бесплатные проверки
+    # после перезагрузки страницы. Кроме токена браузера принимаем
+    # корпоративный ключ X-Api-Key — он тоже привязан к аккаунту.
     user = resolve_any_user(x_token, x_api_key)
-    plan = user["plan"] if user else "free"
+    if user is None:
+        return fail(
+            "UNAUTHORIZED",
+            "нужно войти или зарегистрироваться — проверка доступна по аккаунту",
+            401,
+        )
+    plan = user["plan"]
 
-    if user and plan == "free" and store.free_quota_left(user["id"]) <= 0:
+    if plan == "free" and store.free_quota_left(user["id"]) <= 0:
         return fail(
             "QUOTA_EXCEEDED",
             "бесплатные проверки на сегодня закончились. Подписка снимает лимит.",
@@ -359,13 +393,13 @@ async def check_text(
                 uncertainty=result.trust.uncertainty,
                 level=result.trust.level.value,
                 full=public_payload(result, check_id, "pro"),
-                user_id=user["id"] if user else None,
+                user_id=user["id"],
                 check_id=check_id,
             )
         else:
             # Полный пайплайн: извлечение → источники → оценка → валидация цитат.
             # Без LLM_API_KEY работает детерминированно, с ключом включает модель.
-            outcome = await run_full_check(text, url=url)
+            outcome = await run_full_check(text, url=_clean_url(url))
             payload = outcome_payload(outcome, check_id, plan)
             subject = text or (url or "")
             # В базу всегда кладём полный разбор, независимо от тарифа: он нужен
@@ -378,7 +412,7 @@ async def check_text(
                 uncertainty=outcome.uncertainty,
                 level=outcome.level,
                 full=outcome_payload(outcome, check_id, "pro"),
-                user_id=user["id"] if user else None,
+                user_id=user["id"],
                 check_id=check_id,
             )
     except Exception as exc:  # пайплайн упал — это не 500 без объяснения
@@ -386,8 +420,9 @@ async def check_text(
 
     # Постоянная ссылка на паспорт: одна на утверждение, живёт после закрытия.
     payload["passport"] = f"/p/{store.text_hash(subject)}"
-    if user:
-        payload["quota_left"] = store.free_quota_left(user["id"]) if plan == "free" else None
+    payload["quota_left"] = (
+        store.free_quota_left(user["id"]) if plan == "free" else None
+    )
     return payload
 
 
@@ -557,12 +592,61 @@ async def create_user() -> dict[str, Any]:
     return store.create_user("free")
 
 
+@app.post("/api/auth/register")
+async def register(req: RegisterRequest) -> Any:
+    """Создать аккаунт. Без аккаунта проверки недоступны."""
+    email = (req.email or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]{2,}", email):
+        return fail("BAD_INPUT", "нужен корректный email", 422)
+    if len(req.password or "") < 8:
+        return fail("BAD_INPUT", "пароль короче 8 символов", 422)
+
+    user = store.register_user(email, req.password, req.name)
+    if user is None:
+        return fail("EMAIL_TAKEN", "аккаунт с таким email уже есть", 409)
+
+    out = store.public_user(user)
+    out["token"] = user["token"]
+    out["quota_left"] = store.FREE_CHECKS_PER_DAY
+    out["quota_per_day"] = store.FREE_CHECKS_PER_DAY
+    return out
+
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest) -> Any:
+    user = store.authenticate(req.email, req.password)
+    if user is None:
+        return fail("BAD_CREDENTIALS", "неверный email или пароль", 401)
+
+    out = store.public_user(user)
+    out["token"] = user["token"]
+    if user["plan"] == "free":
+        out["quota_left"] = store.free_quota_left(user["id"])
+        out["quota_per_day"] = store.FREE_CHECKS_PER_DAY
+    return out
+
+
+@app.post("/api/auth/logout")
+async def logout(
+    x_token: Optional[str] = Header(default=None, alias="X-Token"),
+) -> Any:
+    """Выход: токен отзывается, сессия больше не действует."""
+    user = resolve_user(x_token)
+    if user is not None:
+        with store.connect() as conn:
+            conn.execute(
+                "UPDATE users SET token = ? WHERE id = ?",
+                (f"revoked_{store.secrets.token_hex(8)}", user["id"]),
+            )
+    return {"ok": True}
+
+
 @app.get("/api/me")
 async def me(x_token: Optional[str] = Header(default=None, alias="X-Token")) -> Any:
     user = resolve_user(x_token)
     if not user:
         return fail("UNAUTHORIZED", "нужен токен пользователя", 401)
-    out = {"id": user["id"], "plan": user["plan"]}
+    out = store.public_user(user)
     if user["plan"] == "free":
         out["quota_left"] = store.free_quota_left(user["id"])
         out["quota_per_day"] = store.FREE_CHECKS_PER_DAY

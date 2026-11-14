@@ -10,6 +10,8 @@ import { VerdictSkeleton } from './VerdictSkeleton';
 interface Props {
   me: Me | null;
   onMe: (me: Me) => void;
+  /** Попросить войти: вызывается в момент проверки, если аккаунта нет. */
+  onNeedAuth?: (reason: string) => void;
 }
 
 /** Минимальная выдержка скелетона: вердикт должен ощущаться как решение системы. */
@@ -45,7 +47,7 @@ function clearPreset(): void {
   }
 }
 
-export function CheckScreen({ me, onMe }: Props) {
+export function CheckScreen({ me, onMe, onNeedAuth }: Props) {
   // ?q=... кладётся в sessionStorage до рендера — забираем его ровно один раз.
   const [preset] = useState(readPreset);
   const [text, setText] = useState(() => preset ?? '');
@@ -57,6 +59,8 @@ export function CheckScreen({ me, onMe }: Props) {
   const [busy, setBusy] = useState(false);
   const reduced = useReducedMotion();
   const resultRef = useRef<HTMLDivElement>(null);
+  // Текст, который ждёт входа: после авторизации проверка запустится сама.
+  const pendingText = useRef<string | null>(null);
 
   const submit = useCallback(
     async (raw?: string) => {
@@ -79,6 +83,15 @@ export function CheckScreen({ me, onMe }: Props) {
       }
       if (mode === 'text' && value.length < 8) {
         setError('Нужно хотя бы 8 символов — иначе проверять нечего.');
+        return;
+      }
+
+      // Аккаунта нет — не гоняем запрос в пустоту, а просим войти.
+      // Текст остаётся в поле: после входа человек нажмёт кнопку снова
+      // и проверка пройдёт по уже введённому сообщению.
+      if (!me && onNeedAuth) {
+        pendingText.current = value;
+        onNeedAuth('Чтобы проверить сообщение, войдите или создайте аккаунт. Текст уже сохранён.');
         return;
       }
 
@@ -120,6 +133,17 @@ export function CheckScreen({ me, onMe }: Props) {
     void submit(preset);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Гость нажал «Проверить», вошёл в аккаунт — доделываем проверку сами,
+  // чтобы не заставлять нажимать кнопку второй раз.
+  const wasAuthed = Boolean(me);
+  useEffect(() => {
+    if (wasAuthed || !me || !pendingText.current) return;
+    const text = pendingText.current;
+    pendingText.current = null;
+    void submit(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
 
   // Вердикт появился — мягко подводим его в кадр на телефоне.
   useEffect(() => {
