@@ -21,6 +21,13 @@ interface Props {
   onNeedAuth: (reason: string) => void;
 }
 
+/** Подпись тарифа — совпадает с названиями в /api/pricing. */
+function planLabel(plan?: string): string {
+  if (plan === 'pro') return 'Плюс';
+  if (plan === 'team') return 'Макс';
+  return 'База';
+}
+
 export function Header({ tab, me, onNavigate, onLogout, onNeedAuth }: Props) {
   const paid = me?.plan === 'pro' || me?.plan === 'team';
   const [menuOpen, setMenuOpen] = useState(false);
@@ -74,7 +81,8 @@ export function Header({ tab, me, onNavigate, onLogout, onNeedAuth }: Props) {
             onClick={() => setMenuOpen((v) => !v)}
           >
             <span className={`plan-chip plan-chip--${me?.plan ?? 'free'}`}>
-              {paid ? 'Подписка' : 'Бесплатно'}
+              {/* Названия те же, что в тарифах: База / Плюс / Макс. */}
+              {planLabel(me?.plan)}
             </span>
             <span className="account__avatar" aria-hidden="true">
               {(me?.name || me?.email || '?').slice(0, 1).toUpperCase()}
