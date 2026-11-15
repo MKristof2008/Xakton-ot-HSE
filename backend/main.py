@@ -213,6 +213,10 @@ def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
     # и не раскрывает разбор.
     if getattr(outcome, "tag", None):
         base["tag"] = outcome.tag
+    # Границы проверки отдаются всем тарифам. Это не разбор, а честность:
+    # человек должен видеть, чего система не знает, до покупки подписки.
+    # Жюри спрашивает ровно об этом.
+    base["limits"] = outcome.limitations
     if plan not in ("pro", "team"):
         base["upgrade_hint"] = (
             "Разбор — почему такой вердикт, источники и что проверить дальше — "
@@ -222,7 +226,6 @@ def outcome_payload(outcome: Any, check_id: str, plan: str) -> dict[str, Any]:
 
     base["claims"] = [c.as_dict() for c in outcome.claims]
     base["sources_used"] = outcome.sources_used
-    base["limits"] = outcome.limitations
     base["duration_ms"] = outcome.duration_ms
     # Рубрика: из чего сложился балл и вердикт. Это и есть платный разбор.
     if getattr(outcome, "reasoning", None):

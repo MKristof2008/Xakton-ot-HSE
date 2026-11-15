@@ -82,6 +82,20 @@ export function VerdictCard({ result, onUpgraded }: Props) {
         )}
       </div>
 
+      {/* Границы проверки видны всем: честнее сразу сказать, чего система
+          не знает, чем прятать это за подпиской. Жюри задаёт именно этот
+          вопрос, и ответ должен быть на экране, а не в документации. */}
+      {(result.limits ?? []).length > 0 && (
+        <section className="limits limits--public">
+          <h3 className="breakdown__title">Границы проверки</h3>
+          <ul>
+            {(result.limits ?? []).map((limit, i) => (
+              <li key={i}>{limit}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {result.plan === 'free' ? (
         <Paywall onUpgraded={onUpgraded} />
       ) : (

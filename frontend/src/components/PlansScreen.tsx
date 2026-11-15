@@ -75,7 +75,7 @@ export function PlansScreen({ me, onMe, onNeedAuth }: Props) {
       <section className="hero">
         <span className="eyebrow">Тарифы</span>
         <h1 className="hero__title">
-          Бесплатно — вердикт. <em>По подписке — разбор</em>
+          Один вердикт — <em>три глубины разбора</em>
         </h1>
         <p className="hero__lead">{note}</p>
       </section>
