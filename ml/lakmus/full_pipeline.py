@@ -524,6 +524,23 @@ def llm_enabled() -> bool:
     return bool(os.environ.get("LLM_API_KEY") and os.environ.get("LLM_BASE_URL"))
 
 
+def _is_suspicious_for_bank(text: str) -> bool:
+    """Похоже ли утверждение на вирусную выдумку.
+
+    Такие записи в банк не пишем: если система ошиблась и подтвердила
+    фейк, запись закрепит ошибку навсегда — следующая такая же проверка
+    ответит из банка «правда».
+    """
+    try:
+        from . import fake_markers
+    except ImportError:
+        return False
+    try:
+        return bool(fake_markers.find_markers(text))
+    except Exception:
+        return False
+
+
 def _remember(bank: Any, finding: "ClaimFinding", tag_match: Any) -> None:
     """Запомнить проверенный факт в банке знаний и сохранить файл.
 
@@ -531,6 +548,9 @@ def _remember(bank: Any, finding: "ClaimFinding", tag_match: Any) -> None:
     и ссылку на источник. Ошибка записи не ломает проверку — банк нужен
     для ускорения, а не для ответа.
     """
+    # Не запоминаем вирусные фейки: подтверждённая ошибка закрепится.
+    if _is_suspicious_for_bank(finding.text):
+        return
     try:
         saved = bank.learn(
             finding.text,

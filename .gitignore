@@ -21,3 +21,6 @@ ml/**/*.joblib
 ml/lakmus/data/knowledge_bank.json
 ml/lakmus/data/.bank-*.tmp
 docs/demo/*.webm
+ml/data/samples/
+ml/data/labels.jsonl
+ml/data/results_live.jsonl
