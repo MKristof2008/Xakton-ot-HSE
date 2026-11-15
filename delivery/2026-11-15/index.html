@@ -1,0 +1,1015 @@
+<title>Досье «Ревизора»</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+/* ── План: досье проверки. Холодная бумага, чернила, сигнальный зелёный
+   как «подтверждено» и кирпичный как «опровергнуто». Данные — моно. ── */
+:root {
+  --bg: #eef1f2;
+  --surface: #fbfcfc;
+  --surface-2: #e6eaec;
+  --line: #cdd5d8;
+  --line-soft: #dde3e5;
+  --fg: #10181c;
+  --fg-muted: #4d5c63;
+  --fg-faint: #7b8a91;
+  --ink: #10181c;
+  --ok: #0b6b4f;
+  --ok-soft: #dcefe7;
+  --bad: #a32a22;
+  --bad-soft: #f6e0dd;
+  --warn: #8a5a00;
+  --warn-soft: #f5ead2;
+  --accent: #0b6b4f;
+
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", "Consolas", ui-monospace, monospace;
+
+  --measure: 68ch;
+  --rail: 190px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1215;
+    --surface: #141b1f;
+    --surface-2: #1b2429;
+    --line: #2b373d;
+    --line-soft: #212c31;
+    --fg: #e7edef;
+    --fg-muted: #a3b2b8;
+    --fg-faint: #7a898f;
+    --ink: #e7edef;
+    --ok: #4cc79a;
+    --ok-soft: #10362b;
+    --bad: #f08a80;
+    --bad-soft: #3a1a17;
+    --warn: #e0b45c;
+    --warn-soft: #33280f;
+    --accent: #4cc79a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1215;
+  --surface: #141b1f;
+  --surface-2: #1b2429;
+  --line: #2b373d;
+  --line-soft: #212c31;
+  --fg: #e7edef;
+  --fg-muted: #a3b2b8;
+  --fg-faint: #7a898f;
+  --ink: #e7edef;
+  --ok: #4cc79a;
+  --ok-soft: #10362b;
+  --bad: #f08a80;
+  --bad-soft: #3a1a17;
+  --warn: #e0b45c;
+  --warn-soft: #33280f;
+  --accent: #4cc79a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--f-body);
+  font-size: 16.5px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+.wrap { max-width: 1120px; margin: 0 auto; }
+
+/* ── шапка ── */
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.top__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.top__mark {
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--bg);
+  display: grid; place-items: center;
+  font-family: var(--f-mono);
+  font-size: 15px;
+  font-weight: 600;
+}
+.top__meta {
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+/* ── обложка ── */
+.hero { padding: 52px 0 40px; }
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  margin: 0 0 20px;
+}
+.hero h1 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(38px, 7vw, 74px);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  margin: 0 0 22px;
+  text-wrap: balance;
+  max-width: 18ch;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--accent);
+}
+.hero__lead {
+  font-size: clamp(17px, 2.1vw, 20px);
+  line-height: 1.55;
+  color: var(--fg-muted);
+  max-width: 60ch;
+  margin: 0 0 30px;
+}
+.hero__lead strong { color: var(--fg); font-weight: 600; }
+
+.verdict-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 34px 0 0;
+}
+.verdict-strip div {
+  background: var(--surface);
+  padding: 18px 18px 16px;
+  min-width: 0;
+}
+.verdict-strip b {
+  display: block;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(26px, 3.6vw, 34px);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 7px;
+}
+.verdict-strip span {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  display: block;
+  line-height: 1.4;
+}
+.verdict-strip .is-ok b { color: var(--ok); }
+.verdict-strip .is-bad b { color: var(--bad); }
+
+/* ── секции с рельсой ── */
+section { padding: 46px 0; border-top: 1px solid var(--line); }
+.sec-head {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+  margin-bottom: 26px;
+}
+.sec-num {
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  color: var(--fg-faint);
+  padding-top: 10px;
+  text-transform: uppercase;
+}
+.sec-head h2 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(25px, 3.4vw, 34px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  margin: 0;
+  text-wrap: balance;
+}
+.sec-head p {
+  margin: 12px 0 0;
+  color: var(--fg-muted);
+  max-width: var(--measure);
+}
+.body-col {
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
+  gap: 28px;
+}
+.body-col > .content { min-width: 0; }
+.body-col > .content > p { max-width: var(--measure); margin: 0 0 16px; color: var(--fg-muted); }
+.body-col > .content > p strong { color: var(--fg); font-weight: 600; }
+
+/* ── карточки проверок ── */
+.checks { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.check {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+}
+.check.is-ok { border-left-color: var(--ok); }
+.check.is-bad { border-left-color: var(--bad); }
+.check.is-warn { border-left-color: var(--warn); }
+.check__shot {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  object-position: top left;
+  border-radius: 6px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-2);
+  display: block;
+}
+.check__body, .check > div { padding: 2px 6px 6px; }
+.check__kind {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  margin: 0 0 4px;
+}
+.check__verdict {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 21px;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.check__score {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-faint);
+  letter-spacing: 0;
+}
+.check.is-ok .check__verdict { color: var(--ok); }
+.check.is-bad .check__verdict { color: var(--bad); }
+.check.is-warn .check__verdict { color: var(--warn); }
+.check__text { margin: 0; font-size: 14.5px; color: var(--fg-muted); line-height: 1.55; }
+.check__quote {
+  margin: 10px 0 0;
+  padding-left: 11px;
+  border-left: 2px solid var(--line);
+  font-size: 13.5px;
+  color: var(--fg-faint);
+  font-style: normal;
+}
+
+/* ── пайплайн ── */
+.pipe { display: grid; gap: 0; margin: 8px 0 0; }
+.pipe__row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: baseline;
+  padding: 15px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.pipe__row:last-child { border-bottom: 0; }
+.pipe__n {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pipe__what { font-weight: 600; }
+.pipe__what small { display: block; font-weight: 400; color: var(--fg-muted); font-size: 14px; margin-top: 2px; }
+.pipe__when {
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+
+/* ── сильные стороны / критерии ── */
+.crit { display: grid; gap: 12px; }
+.crit__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  gap: 18px;
+  align-items: start;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.crit__row:last-child { border-bottom: 0; }
+.crit__name {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 17.5px;
+  letter-spacing: -0.015em;
+  margin: 0 0 5px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.crit__name .w {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--fg-faint);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 1px 7px;
+  letter-spacing: 0.06em;
+}
+.crit__why { margin: 0; font-size: 14.5px; color: var(--fg-muted); max-width: 62ch; }
+.crit__why b { color: var(--fg); font-weight: 600; }
+.crit__tick {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--ok);
+  text-align: right;
+  padding-top: 3px;
+  letter-spacing: 0.04em;
+}
+
+/* ── таблица ── */
+.table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 460px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+th {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  font-weight: 500;
+  background: var(--surface-2);
+}
+tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── честные ограничения ── */
+.limits { display: grid; gap: 10px; }
+.limit {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 13px 15px;
+}
+.limit__dot {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--warn-soft);
+  color: var(--warn);
+  display: grid; place-items: center;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 3px;
+}
+.limit p { margin: 0; font-size: 14.5px; color: var(--fg-muted); }
+.limit p b { color: var(--fg); font-weight: 600; }
+
+/* ── видео ── */
+.video-box {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b0f11;
+}
+.video-box video { display: block; width: 100%; height: auto; }
+.video-note {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  padding: 10px 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+/* ── ссылки / запуск ── */
+.launch { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.launch a, .launch .box {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 15px 16px;
+  text-decoration: none;
+  color: inherit;
+}
+.launch a:hover { border-color: var(--accent); }
+.launch .k {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  display: block;
+  margin-bottom: 5px;
+}
+.launch .v { font-weight: 600; font-size: 15px; word-break: break-word; }
+.launch .v.mono { font-family: var(--f-mono); font-size: 13px; font-weight: 400; }
+
+pre {
+  margin: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--fg);
+}
+
+/* ── вопросы жюри ── */
+.qa { display: grid; gap: 0; }
+.qa details {
+  border-bottom: 1px solid var(--line-soft);
+  padding: 15px 0;
+}
+.qa details:first-child { border-top: 1px solid var(--line-soft); }
+.qa summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15.5px;
+  list-style: none;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::before {
+  content: "+";
+  font-family: var(--f-mono);
+  color: var(--fg-faint);
+  font-weight: 400;
+  flex: none;
+}
+.qa details[open] summary::before { content: "−"; }
+.qa .a { margin: 10px 0 0 22px; font-size: 14.5px; color: var(--fg-muted); max-width: 64ch; }
+.qa .a b { color: var(--fg); font-weight: 600; }
+
+.foot {
+  border-top: 1px solid var(--line);
+  padding: 26px 0 44px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--ok-soft);
+  border-radius: 0 9px 9px 0;
+  padding: 14px 18px;
+  margin: 22px 0 0;
+  font-size: 15px;
+  max-width: 66ch;
+}
+.callout b { color: var(--fg); }
+
+@media (max-width: 860px) {
+  :root { --rail: 0px; }
+  .sec-head, .body-col { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .sec-num { padding-top: 0; }
+  .verdict-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .checks { grid-template-columns: minmax(0, 1fr); }
+  .check__shot { aspect-ratio: 16 / 9; }
+}
+@media (max-width: 460px) {
+  body { font-size: 16px; }
+  .verdict-strip div { padding: 14px 12px; }
+  .pipe__row { grid-template-columns: 26px minmax(0, 1fr); }
+  .pipe__when { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <div class="top">
+    <div class="top__brand">
+      <span class="top__mark" aria-hidden="true">✓</span>
+      Ревизор
+    </div>
+    <div class="top__meta">Вайбхак ФКН ВШЭ · 15 ноября 2026 · сдача до 12:15</div>
+  </div>
+
+  <header class="hero">
+    <p class="eyebrow">Тема №2 · «Интернет больше не доказательство»</p>
+    <h1>Мы сдали не презентацию, а <em>работающий сервис</em></h1>
+    <p class="hero__lead">
+      «Ревизор» принимает то, что реально приходит в мессенджер — текст, ссылку,
+      скриншот и видео — и возвращает вердикт с доказательством: <strong>правда,
+      фейк или непонятно</strong>. Вердикт собран по рубрике из шести критериев,
+      каждая цитата перепроверена кодом, а не «мнением модели».
+    </p>
+
+    <div class="verdict-strip">
+      <div class="is-ok"><b>407</b><span>тестов зелёных,<br>1 пропущен</span></div>
+      <div><b>4</b><span>входа: текст,<br>ссылка, фото, видео</span></div>
+      <div class="is-ok"><b>26/28</b><span>на эталонном наборе<br>без ключей модели</span></div>
+      <div><b>21</b><span>тема в курируемой<br>базе фактов</span></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">01 / что сдали</div>
+      <div>
+        <h2>Сайт, репозиторий, тесты, демо и питч — всё в рабочем состоянии</h2>
+        <p>Ни один пункт не «на слайдах»: каждый проверен запуском сегодня, 15 ноября, до сдачи.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Что сдаём</th><th>Состояние</th><th>Чем подтверждается</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Работающий сайт</td><td>Запущен</td><td class="num">http://127.0.0.1:8000 · /api/health → ok</td></tr>
+              <tr><td>Репозиторий с историей</td><td>57 коммитов, 4 автора</td><td class="num">github.com/MKristof2008/Xakton-ot-HSE</td></tr>
+              <tr><td>Тесты</td><td>407 passed, 1 skipped</td><td class="num">pytest -q · 10.7 с</td></tr>
+              <tr><td>Прогон качества</td><td>26/28 (93%)</td><td class="num">ml/tools/eval_run.py</td></tr>
+              <tr><td>Демо-видео</td><td>Записано сегодня</td><td class="num">demo/revizor-demo.mp4</td></tr>
+              <tr><td>Кадры по сценариям</td><td>21 скриншот</td><td class="num">shots/</td></tr>
+              <tr><td>CI</td><td>GitHub Actions на каждый push</td><td class="num">.github/workflows</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">02 / четыре входа</div>
+      <div>
+        <h2>Проверяет всё, что пересылают, — и это видно на одном экране</h2>
+        <p>Ниже — реальные прогоны сегодняшнего запуска, не макеты. Цифры вердикта взяты из ответа API.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="checks">
+
+          <article class="check is-bad">
+            <img class="check__shot" src="shots/02-text.png" alt="Экран вердикта для текста: «Скорее фейк», 15 из 100" loading="lazy">
+            <div>
+              <p class="check__kind">Вход 1 · текст</p>
+              <h3 class="check__verdict">Скорее фейк <span class="check__score">15 / 100</span></h3>
+              <p class="check__text">
+                «СРОЧНО! ЦБ запретил снятие наличных с 1 марта 2026 года. Перешлите всем!» —
+                утверждение выделено, сверено с базой фактов, вердикт опровергает сообщение.
+                Проверка заняла 0 мс: известная тема закрывается без сети.
+              </p>
+              <p class="check__quote">Тема: «Деньги и ЦБ» · зацепки: ЦБ, наличные</p>
+            </div>
+          </article>
+
+          <article class="check is-ok">
+            <img class="check__shot" src="shots/04-link.png" alt="Экран вердикта для ссылки: «Скорее правда», 95 из 100" loading="lazy">
+            <div>
+              <p class="check__kind">Вход 2 · ссылка</p>
+              <h3 class="check__verdict">Скорее правда <span class="check__score">95 / 100</span></h3>
+              <p class="check__text">
+                Ссылка на пресс-релиз ЦБ плюс утверждение «ставка 21% с 25 октября 2024».
+                Совпало с базой дословно, цитата найдена в источнике кодом.
+              </p>
+              <p class="check__quote">
+                «25 октября 2024 года Банк России повысил ключевую ставку до 21,00% годовых» — Банк России, пресс-релиз от 25.10.2024
+              </p>
+            </div>
+          </article>
+
+          <article class="check is-ok">
+            <img class="check__shot" src="shots/05-photo.png" alt="Экран вердикта по скриншоту: «Скорее правда», 83 из 100, 7 сигналов" loading="lazy">
+            <div>
+              <p class="check__kind">Вход 3 · скриншот</p>
+              <h3 class="check__verdict">Скорее правда <span class="check__score">83 / 100 · 7 сигналов</span></h3>
+              <p class="check__text">
+                По файлу видно, что именно проверили: метаданные, следы ИИ-генерации,
+                следы монтажа, поиск первоисточника. Отсутствие метаданных честно
+                помечено как нейтральное, а не выдано за доказательство.
+              </p>
+              <p class="check__quote">Следы ИИ-генерации: «подтверждает», вес 88% · следы монтажа: «нейтрально», вес 10%</p>
+            </div>
+          </article>
+
+          <article class="check is-bad">
+            <img class="check__shot" src="shots/06-video.png" alt="Экран вердикта по видео: «Скорее фейк», 18 из 100, следы генератора sora" loading="lazy">
+            <div>
+              <p class="check__kind">Вход 4 · видео</p>
+              <h3 class="check__verdict">Скорее фейк <span class="check__score">18 / 100</span></h3>
+              <p class="check__text">
+                В метаданных контейнера — подпись генератора. Система не только называет
+                вердикт, но и сразу говорит, что делать: не пересылать материал.
+              </p>
+              <p class="check__quote">Видео · «опровергает» · «В метаданных ролика есть следы генератора (sora)» · вес 85%</p>
+            </div>
+          </article>
+
+        </div>
+
+        <p style="margin-top:22px">
+          Кроме вердикта на экране есть <b>паспорт утверждения</b> — постоянная ссылка вида
+          <span style="font-family:var(--f-mono);font-size:13.5px">/p/302ac6dc202930c2</span>,
+          которую человек пересылает в чат как аргумент. Это то, чего нет у ручного фактчека.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">03 / как решает</div>
+      <div>
+        <h2>Модель не источник истины: каждую её цитату проверяет код</h2>
+        <p>Именно поэтому ошибка модели понижает вердикт до «непонятно», а не рождает уверенную ложь. Это главный ответ на вопрос «а если ИИ ошибётся».</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="pipe">
+          <div class="pipe__row">
+            <div class="pipe__n">01</div>
+            <div class="pipe__what">Тема и чек-лист<small>Детерминированная разметка без модели: деньги, законы, здоровье, происшествия, армия и ещё шесть классов. У темы свои правила проверки.</small></div>
+            <div class="pipe__when">без сети</div>
+          </div>
+          <div class="pipe__row">
+            <div class="pipe__n">02</div>
+            <div class="pipe__what">База фактов<small>21 курируемая тема. Сравнение чисел и годов детерминированное: «ставка 15%» не пройдёт, если в базе 21%.</small></div>
+            <div class="pipe__when">~1 мс</div>
+          </div>
+          <div class="pipe__row">
+            <div class="pipe__n">03</div>
+            <div class="pipe__what">Источники<small>База + интернет + ссылка пользователя. Сатирический и недостоверный домен не может быть доказательством; подделка <span style="font-family:var(--f-mono);font-size:13px">cbr.ru.evil.com</span> не наследует доверие <span style="font-family:var(--f-mono);font-size:13px">cbr.ru</span>.</small></div>
+            <div class="pipe__when">3–10 с с ключом</div>
+          </div>
+          <div class="pipe__row">
+            <div class="pipe__n">04</div>
+            <div class="pipe__what">Оценка и валидация<small>Модель возвращает ссылку на источник, а не URL. Цитата обязана дословно найтись в тексте источника — иначе вердикт понижается.</small></div>
+            <div class="pipe__when">2–15 с с ключом</div>
+          </div>
+          <div class="pipe__row">
+            <div class="pipe__n">05</div>
+            <div class="pipe__what">Рубрика и обучение<small>Шесть критериев с баллом и словесным обоснованием. Поправка человека уходит в банк знаний и меняет следующий ответ — модель её не перетирает.</small></div>
+            <div class="pipe__when">постоянно</div>
+          </div>
+        </div>
+
+        <div class="callout">
+          <b>Четыре защиты от вранья модели.</b> Подтверждение требует дословной цитаты.
+          Прогноз о будущем не может быть ложью. Безымянное утверждение («компания X»)
+          непроверяемо. Составное утверждение не опровергается наспех.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">04 / почему мы сильные</div>
+      <div>
+        <h2>По каждому критерию жюри есть что показать, а не что пообещать</h2>
+        <p>Веса — из регламента вайбхака. Справа — не оценка, а факт, который можно проверить на защите.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="crit">
+
+          <div class="crit__row">
+            <div>
+              <h3 class="crit__name">Оригинальность <span class="w">25%</span></h3>
+              <p class="crit__why">
+                Мы не показываем «процент фейковости». Вердикт собран по рубрике из шести
+                критериев, и <b>у каждого балла есть словесная причина</b>. Плюс два механизма,
+                которых нет у детекторов: <b>паспорт утверждения</b> как аргумент в переписке
+                и <b>топы проверок</b>, где одинаковые сообщения схлопываются в одну строку.
+              </p>
+            </div>
+            <div class="crit__tick">есть</div>
+          </div>
+
+          <div class="crit__row">
+            <div>
+              <h3 class="crit__name">Польза <span class="w">20%</span></h3>
+              <p class="crit__why">
+                Закрывает ровно ту боль, из которой выросла тема: проверка пересланного
+                сообщения стоит часы редактора или не делается вовсе. У нас —
+                <b>0 мс на известной теме</b> и секунды с поиском. Понятно, кто платит:
+                редакции и каналы, а читатель получает вердикт бесплатно.
+              </p>
+            </div>
+            <div class="crit__tick">есть</div>
+          </div>
+
+          <div class="crit__row">
+            <div>
+              <h3 class="crit__name">Работоспособность <span class="w">20%</span></h3>
+              <p class="crit__why">
+                Заявленный сценарий выполняется целиком: <b>текст, ссылка, скриншот и видео</b>
+                дают вердикт, разбор, шаги «что делать» и постоянную ссылку. 407 тестов
+                зелёные, прогон на эталонном наборе — <b>26 из 28</b> без ключей модели.
+              </p>
+            </div>
+            <div class="crit__tick">есть</div>
+          </div>
+
+          <div class="crit__row">
+            <div>
+              <h3 class="crit__name">Качество исполнения <span class="w">15%</span></h3>
+              <p class="crit__why">
+                Один экран отвечает на вопрос без инструкции: вердикт, уровень доверия,
+                неуверенность, время проверки, сигналы с весами, границы проверки.
+                Есть светлая и тёмная темы, мобильная вёрстка и <b>честные пометки</b>
+                там, где функция не подключена.
+              </p>
+            </div>
+            <div class="crit__tick">есть</div>
+          </div>
+
+          <div class="crit__row">
+            <div>
+              <h3 class="crit__name">Работа в команде <span class="w">10%</span></h3>
+              <p class="crit__why">
+                Четыре зоны зафиксированы в <span style="font-family:var(--f-mono);font-size:13.5px">HANDOFF.md</span>
+                (ML, бэкенд, фронтенд, демо и документы), правило «один файл — один хозяин»,
+                мерж в <span style="font-family:var(--f-mono);font-size:13.5px">main</span> только после зелёных тестов.
+                В истории <b>57 коммитов четырёх авторов</b> и отдельные ветки под каждую зону.
+              </p>
+            </div>
+            <div class="crit__tick">есть</div>
+          </div>
+
+          <div class="crit__row">
+            <div>
+              <h3 class="crit__name">Использование ИИ <span class="w">10%</span></h3>
+              <p class="crit__why">
+                ИИ — двигатель, а не обёртка: извлечение утверждений, оценка по источникам,
+                объяснение вердикта. При этом модель <b>не решает вердикт одна</b>:
+                её ответ проходит детерминированную валидацию цитаты, а при отсутствии
+                ключа пайплайн работает полностью без модели.
+              </p>
+            </div>
+            <div class="crit__tick">есть</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">05 / цифры</div>
+      <div>
+        <h2>Всё, что мы заявляем, пересчитывается одной командой</h2>
+        <p>Числа ниже получены сегодняшним запуском, а не взяты из черновика.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Показатель</th><th>Значение</th><th>Как проверить</th></tr></thead>
+            <tbody>
+              <tr><td>Тесты</td><td class="num">407 passed · 1 skipped</td><td class="num">python -m pytest -q</td></tr>
+              <tr><td>Эталонный набор</td><td class="num">26 / 28 · 93%</td><td class="num">ml/tools/eval_run.py</td></tr>
+              <tr><td>Скорость известного факта</td><td class="num">0–16 мс</td><td class="num">в карточке вердикта</td></tr>
+              <tr><td>База фактов</td><td class="num">21 тема</td><td class="num">GET /api/sources</td></tr>
+              <tr><td>Код</td><td class="num">≈ 29 700 строк</td><td class="num">backend + ml + frontend</td></tr>
+              <tr><td>История</td><td class="num">57 коммитов · 4 автора</td><td class="num">git log --shortlog</td></tr>
+              <tr><td>Файлов тестов</td><td class="num">33</td><td class="num">ml/tests/</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">06 / демо</div>
+      <div>
+        <h2>Полный обзор сайта записан на видео: все четыре проверки подряд</h2>
+        <p>Видео записано автоматически в браузере на тарифе «Редакция», поэтому в кадре виден полный разбор — с подписями по шагам.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="video-box">
+          <video controls preload="metadata" playsinline poster="shots/01-home.png">
+            <source src="demo/revizor-full-tour.mp4" type="video/mp4">
+            Ваш браузер не воспроизводит видео — файл лежит рядом: demo/revizor-full-tour.mp4
+          </video>
+          <div class="video-note">
+            <span>Ревизор · полный обзор</span>
+            <span>текст → ссылка → скриншот → видео → топы → тарифы</span>
+          </div>
+        </div>
+
+        <p style="margin-top:20px">
+          Короткая версия на 44 секунды (четыре входа без подписей) —
+          <span style="font-family:var(--f-mono);font-size:13.5px">demo/revizor-demo.mp4</span>.
+          Кадры по шагам — в папке <span style="font-family:var(--f-mono);font-size:13.5px">shots/</span>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">07 / честно</div>
+      <div>
+        <h2>Что не работает — говорим сами, чтобы не поймали на защите</h2>
+        <p>Ни одна из этих функций не выдаёт себя за рабочую в интерфейсе. Это принцип команды, а не оговорка.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="limits">
+          <div class="limit">
+            <div class="limit__dot">!</div>
+            <p><b>Оплата — симулятор.</b> Платёж создаётся и подтверждается в нашей базе, реального списания нет. В интерфейсе это написано прямым текстом.</p>
+          </div>
+          <div class="limit">
+            <div class="limit__dot">!</div>
+            <p><b>Демо снято без ключей.</b> Без ключа модели и поиска проверка идёт по курируемой базе фактов — это видно по «проверка заняла 0 мс». С ключами подключаются поиск и извлечение утверждений из свободного текста.</p>
+          </div>
+          <div class="limit">
+            <div class="limit__dot">!</div>
+            <p><b>База фактов — 21 тема.</b> Это демонстрация механики, а не полноценный фактчек. Чего нет в базе — помечается «не проверили», а не выдаётся за проверенное.</p>
+          </div>
+          <div class="limit">
+            <div class="limit__dot">!</div>
+            <p><b>Текст со скриншота</b> распознаётся только при установленном OCR. Без него сигнал честно отвечает «нет данных».</p>
+          </div>
+          <div class="limit">
+            <div class="limit__dot">!</div>
+            <p><b>Звук и речь в видео не анализируются.</b> Проверяются метаданные контейнера и статичность кадров.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">08 / вопросы</div>
+      <div>
+        <h2>Что спросят на защите — и что отвечаем</h2>
+        <p>Раскройте любой пункт. Ответы короткие, без общих слов.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <div class="qa">
+          <details>
+            <summary>Чем вы отличаетесь от SHOT Проверки и «Лапши Медиа»?</summary>
+            <div class="a">У них разбор пишет редактор часами. У нас — <b>секунды и постоянная ссылка</b> на каждую проверку. Мы не спорим за аудиторию фактчекеров, мы даём инструмент, который встраивается в пересылку сообщения.</div>
+          </details>
+          <details>
+            <summary>Почему люди будут платить, если проверка бесплатна везде?</summary>
+            <div class="a">Бесплатно — <b>вердикт</b>. Платно — <b>объём объяснения</b>: почему такой вердикт, цитата из первоисточника, что проверить дальше, готовый текст для пересылки. Платят редакции и каналы, которым нужен разбор без редактора.</div>
+          </details>
+          <details>
+            <summary>Что будет, если модель ошибётся?</summary>
+            <div class="a">Цитата проверяется кодом: не нашлась в источнике — <b>вердикт понижается до «непонятно»</b>. Худший исход — «не проверили», а не уверенная ложь. Это заложено в архитектуру, а не в промпт.</div>
+          </details>
+          <details>
+            <summary>Почему вердикт одинаков на всех тарифах?</summary>
+            <div class="a">Это осознанное решение: <b>качество ответа не зависит от оплаты</b>. Если платящий получает другой вердикт на тот же вопрос, доверие к сервису рушится. Тариф расширяет только объяснение.</div>
+          </details>
+          <details>
+            <summary>Откуда цифра 26 из 28?</summary>
+            <div class="a">Это прогон на нашем эталонном наборе из 28 кейсов: <span style="font-family:var(--f-mono);font-size:13px">python -I ml/tools/eval_run.py</span>. Два провала названы в отчёте поимённо, с причиной. Мы не выдаём свою выборку за независимый бенчмарк.</div>
+          </details>
+          <details>
+            <summary>Можно ли это развернуть и стоит ли дорого?</summary>
+            <div class="a">Да: Docker или systemd плюс nginx, инструкция в <span style="font-family:var(--f-mono);font-size:13px">docs/DEPLOY.md</span>. Пайплайн лёгкий — хватает <b>1 CPU и 1 ГБ RAM</b>. Расходы — только ключ модели и поиска.</div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">09 / запуск</div>
+      <div>
+        <h2>Проверить за две минуты, без нас</h2>
+        <p>Всё, что нужно, — Python и Node. Ключи для демо не обязательны.</p>
+      </div>
+    </div>
+    <div class="body-col">
+      <div class="sec-num"></div>
+      <div class="content">
+        <pre><code># тесты — ключ не нужен, сеть не нужна
+python -m pytest -q
+
+# сервер и интерфейс
+python -m uvicorn backend.main:app --port 8000
+cd frontend &amp;&amp; npm install &amp;&amp; npm run dev
+
+# прогон качества на эталонном наборе
+python -I ml/tools/eval_run.py</code></pre>
+
+        <div class="launch" style="margin-top:16px">
+          <a href="https://github.com/MKristof2008/Xakton-ot-HSE" target="_blank" rel="noopener">
+            <span class="k">Репозиторий</span>
+            <span class="v mono">github.com/MKristof2008/Xakton-ot-HSE</span>
+          </a>
+          <div class="box">
+            <span class="k">Локально</span>
+            <span class="v mono">http://127.0.0.1:8000</span>
+          </div>
+          <div class="box">
+            <span class="k">Аккаунт жюри · «Макс»</span>
+            <span class="v mono">jury-max@revizor.demo / revizor-2026</span>
+          </div>
+          <div class="box">
+            <span class="k">Если аккаунтов нет</span>
+            <span class="v">Регистрация с любым email и паролем от 8 символов — проверка доступна сразу</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <span>Ревизор · команда IT-отдела · 15.11.2026</span>
+    <span>Материалы: сайт · репозиторий · видео · 21 кадр</span>
+  </div>
+
+</div>
