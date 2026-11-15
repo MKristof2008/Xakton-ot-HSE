@@ -290,7 +290,19 @@ def _apply_text_guards(text: str, finding: ClaimFinding) -> ClaimFinding:
         finding.status = "insufficient"
         finding.explanation = "В утверждении нет конкретных имён и чисел: проверить нечего."
         return finding
-    if _is_future(text) and finding.status == "contradicted":
+    # Прогноз нельзя назвать ложью — но только когда он о том, чего ещё
+    # нет. «Пенсионный возраст повысят до 70» опровергается действующим
+    # законом: факт известен, и это не прогноз, а выдумка. Поэтому
+    # опровержение базы фактов сильнее слова «повысят».
+    # Прогноз нельзя назвать ложью. Исключение одно: база фактов уже знает
+    # действующее значение, и прогноз ему прямо противоречит числом
+    # («повысят до 70» против «сейчас 65»). Это не прогноз, а выдумка.
+    contradicted_by_number = (
+        finding.status == "contradicted"
+        and bool(finding.quote)
+        and bool(_content_numbers(text))
+    )
+    if _is_future(text) and finding.status == "contradicted" and not contradicted_by_number:
         finding.status = "insufficient"
         finding.explanation = "Это прогноз о будущем: проверить его сейчас нельзя."
     return finding
