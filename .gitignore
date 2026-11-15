@@ -20,3 +20,4 @@ ml/**/*.joblib
 # банк знаний пополняется при проверках: в git едет только пустой шаблон
 ml/lakmus/data/knowledge_bank.json
 ml/lakmus/data/.bank-*.tmp
+docs/demo/*.webm
